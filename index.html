@@ -481,6 +481,7 @@ const lastActions = JSON.parse(localStorage.getItem("diceTableActions") || "{}")
 function record(act) {
   lastActions[current] = act;
   localStorage.setItem("diceTableActions", JSON.stringify(lastActions));
+  markDirty(current);
   updateRerollBtn();
 }
 function updateRerollBtn() {
@@ -556,10 +557,11 @@ function show(label, total, detail, extra, crit, sides, multi, bonus, dieValue) 
   clearTimeout(settleTimer);
   const who = current;
   sides = sides || 20;
-  const entry = { t: total, w: label, d: detail + (extra ? " · " + extra.replace(/<[^>]*>/g, "") : "") };
+  const entry = { id: Date.now() + Math.random(), t: total, w: label, d: detail + (extra ? " · " + extra.replace(/<[^>]*>/g, "") : "") };
   lastRolls[who] = { label, total, detail, extra: extra || "", crit: crit || null, sides,
     bonus: bonus || null, dieValue: dieValue != null ? dieValue : null };
   saveLast();
+  markDirty(who);
   const r = document.getElementById("result");
   const banner = document.getElementById("r-banner");
   const bonusEl = document.getElementById("r-bonus");
@@ -591,6 +593,7 @@ function commitEntry(who, entry) {
   logs[who].unshift(entry);
   if (logs[who].length > 80) logs[who].length = 80;
   saveLogs();
+  markDirty(who);
   if (current === who) {
     renderLog();
     const first = document.querySelector("#log .logentry");
@@ -748,17 +751,17 @@ function castPool() {
 function hpChange(charKey, delta) {
   const s = state[charKey];
   s.hp = Math.max(0, Math.min(CHARS[charKey].hpMax, s.hp + delta));
-  save(); renderSheet();
+  save(); markDirty(charKey); renderSheet();
 }
 function toggleSlot(charKey, idx) {
   const s = state[charKey];
   s.used = (idx < s.used) ? idx : idx + 1;
-  save(); renderSheet();
+  save(); markDirty(charKey); renderSheet();
 }
 function toggleRage(charKey, idx) {
   const s = state[charKey];
   s.rageUsed = (idx < s.rageUsed) ? idx : idx + 1;
-  save(); renderSheet();
+  save(); markDirty(charKey); renderSheet();
 }
 
 function renderSheet() {
@@ -810,7 +813,7 @@ function renderTabs() {
   t.innerHTML = Object.keys(CHARS).map(k =>
     `<button class="${k === current ? "active" : ""}" style="--tabc:${CHARS[k].color}" onclick="current='${k}';applyTheme();renderTabs();renderSheet();renderLog();displayLast()">${CHARS[k].emblem} ${CHARS[k].name}</button>`).join("");
 }
-function clearLog() { logs[current] = []; saveLogs(); renderLog(); }
+function clearLog() { logs[current] = []; saveLogs(); markDirty(current); renderLog(); }
 
 /* ── Snowfall ── */
 (function snow() {
@@ -829,6 +832,84 @@ function clearLog() { logs[current] = []; saveLogs(); renderLog(); }
   }
 })();
 
+/* ── cross-device sync (Vercel Blob via /api/state) ── */
+const TABLE = ((new URLSearchParams(location.search)).get("table") || "the-proving")
+  .replace(/[^a-zA-Z0-9-]/g, "").slice(0, 40) || "the-proving";
+const SYNC_ON = location.protocol.startsWith("http");
+const syncMeta = JSON.parse(localStorage.getItem("diceTableSyncMeta") || "{}");
+let dirtyChars = {};
+let pushTimer = null;
+
+function markDirty(who) {
+  syncMeta[who] = Date.now();
+  localStorage.setItem("diceTableSyncMeta", JSON.stringify(syncMeta));
+  if (!SYNC_ON) return;
+  dirtyChars[who] = true;
+  clearTimeout(pushTimer);
+  pushTimer = setTimeout(pushDirty, 800);
+}
+
+async function pushDirty() {
+  const whos = Object.keys(dirtyChars);
+  dirtyChars = {};
+  for (const who of whos) {
+    const bundle = {
+      state: state[who],
+      logs: logs[who],
+      lastRoll: lastRolls[who] || null,
+      lastAction: lastActions[who] || null,
+      updatedAt: syncMeta[who] || Date.now(),
+    };
+    try {
+      await fetch(`/api/state?table=${TABLE}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ who, bundle }),
+      });
+    } catch (e) {
+      dirtyChars[who] = true; /* retry on the next push */
+    }
+  }
+}
+
+function mergeLogs(localL, remoteL) {
+  const key = e => e.id || (e.t + "|" + e.w + "|" + e.d);
+  const seen = new Set(localL.map(key));
+  const merged = localL.concat(remoteL.filter(e => !seen.has(key(e))));
+  merged.sort((a, b) => (b.id || 0) - (a.id || 0));
+  return merged.slice(0, 80);
+}
+
+let pulling = false;
+async function pullState() {
+  if (document.visibilityState !== "visible" || pulling) return;
+  pulling = true;
+  try {
+    const r = await fetch(`/api/state?table=${TABLE}`, { cache: "no-store" });
+    if (r.ok) {
+      const remote = await r.json();
+      let changed = false;
+      for (const who in CHARS) {
+        const rb = remote[who];
+        if (!rb || !rb.updatedAt || (syncMeta[who] || 0) >= rb.updatedAt) continue;
+        if (rb.state) state[who] = rb.state;
+        logs[who] = mergeLogs(logs[who] || [], rb.logs || []);
+        if (rb.lastRoll) lastRolls[who] = rb.lastRoll;
+        if (rb.lastAction) lastActions[who] = rb.lastAction;
+        syncMeta[who] = rb.updatedAt;
+        changed = true;
+      }
+      if (changed) {
+        save(); saveLogs(); saveLast();
+        localStorage.setItem("diceTableActions", JSON.stringify(lastActions));
+        localStorage.setItem("diceTableSyncMeta", JSON.stringify(syncMeta));
+        renderSheet(); renderLog(); updateRerollBtn();
+      }
+    }
+  } catch (e) { /* offline or local file: stay quiet */ }
+  pulling = false;
+}
+
 applyTheme();
 renderTabs();
 renderSheet();
@@ -836,6 +917,12 @@ renderLog();
 renderPool();
 updateRerollBtn();
 window.addEventListener("load", () => { setTimeout(displayLast, 150); });
+if (SYNC_ON) {
+  setInterval(pullState, 6000);
+  pullState();
+  const foot = document.querySelector("footer");
+  if (foot) foot.textContent += ` · table: ${TABLE}`;
+}
 </script>
 
 <script type="importmap">
