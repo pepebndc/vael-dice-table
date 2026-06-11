@@ -345,6 +345,25 @@
     background: none; border: 1px solid #9cbeda; color: var(--ink-soft); border-radius: 5px; padding: 3px 10px; cursor: pointer;
   }
   footer { position: relative; z-index: 3; text-align: center; margin-top: 26px; color: #7d9fc0; font-style: italic; font-size: 13px; text-shadow: 0 1px 3px rgba(0,0,0,.6); }
+
+  /* ── Sync toggle ──────────────────────── */
+  #synctoggle {
+    position: fixed; top: 14px; right: 16px; z-index: 40; display: none;
+    font-family: "Cinzel", serif; font-weight: 700; font-size: 11.5px; letter-spacing: 1.5px;
+    border-radius: 16px; padding: 6px 14px; cursor: pointer; transition: all .2s;
+  }
+  #synctoggle.on {
+    display: block;
+    background: linear-gradient(180deg, #3a2c12, #221806); color: #ffd97a;
+    border: 1px solid #c89a3c; box-shadow: 0 0 16px rgba(224,154,60,.5);
+    text-shadow: 0 0 8px rgba(255,217,122,.5);
+  }
+  #synctoggle.off {
+    display: block;
+    background: linear-gradient(180deg, #23262e, #15171d); color: #6e7687;
+    border: 1px dashed #4a5160;
+  }
+  #synctoggle:hover { transform: translateY(1px); }
 </style>
 </head>
 <body>
@@ -353,6 +372,7 @@
 <div class="range near"></div>
 
 <div class="content">
+<button id="synctoggle" onclick="toggleSync()" title="While the Veil is attuned, thy deeds, wounds, and journals travel between devices. Sever it and they stay on this one, as in a dead zone."></button>
 <header>
   <div class="ornament">❄ ⛰ ❄</div>
   <h1>THE PROVING OF <span class="gold">MOUNT VAEL</span></h1>
@@ -840,13 +860,33 @@ const syncMeta = JSON.parse(localStorage.getItem("diceTableSyncMeta") || "{}");
 let dirtyChars = {};
 let pushTimer = null;
 
+let syncEnabled = localStorage.getItem("diceTableSyncPref") !== "off";
+
 function markDirty(who) {
   syncMeta[who] = Date.now();
   localStorage.setItem("diceTableSyncMeta", JSON.stringify(syncMeta));
-  if (!SYNC_ON) return;
+  if (!SYNC_ON || !syncEnabled) return;
   dirtyChars[who] = true;
   clearTimeout(pushTimer);
   pushTimer = setTimeout(pushDirty, 800);
+}
+
+function renderSyncToggle() {
+  const b = document.getElementById("synctoggle");
+  if (!SYNC_ON) { b.className = ""; return; }
+  b.className = syncEnabled ? "on" : "off";
+  b.textContent = syncEnabled ? "✦ VEIL ATTUNED" : "✠ VEIL SEVERED";
+}
+
+function toggleSync() {
+  syncEnabled = !syncEnabled;
+  localStorage.setItem("diceTableSyncPref", syncEnabled ? "on" : "off");
+  renderSyncToggle();
+  if (syncEnabled) {
+    for (const k in CHARS) dirtyChars[k] = true; /* offer local snapshot to the table */
+    pushDirty();
+    pullState();
+  }
 }
 
 async function pushDirty() {
@@ -882,7 +922,7 @@ function mergeLogs(localL, remoteL) {
 
 let pulling = false;
 async function pullState() {
-  if (document.visibilityState !== "visible" || pulling) return;
+  if (!syncEnabled || document.visibilityState !== "visible" || pulling) return;
   pulling = true;
   try {
     const r = await fetch(`/api/state?table=${TABLE}`, { cache: "no-store" });
@@ -917,11 +957,12 @@ renderLog();
 renderPool();
 updateRerollBtn();
 window.addEventListener("load", () => { setTimeout(displayLast, 150); });
+renderSyncToggle();
 if (SYNC_ON) {
   setInterval(pullState, 6000);
   pullState();
   const foot = document.querySelector("footer");
-  if (foot) foot.textContent += ` · table: ${TABLE}`;
+  if (foot) foot.textContent += ` · expedition: ${TABLE}`;
 }
 </script>
 
