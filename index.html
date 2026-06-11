@@ -1,0 +1,1242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Reaches · Dice Table</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;900&family=Cinzel+Decorative:wght@700&family=IM+Fell+English:ital@0;1&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --accent: #e09a3c;
+    --accent-soft: rgba(224, 154, 60, 0.25);
+    --frost: #e9f2fa;
+    --frost2: #d3e4f2;
+    --frost-edge: #9cbeda;
+    --ink: #1e3247;
+    --ink-soft: #54708a;
+    --blood: #a33636;
+    --arcane: #3e6ca5;
+    --good: #2f7d3f;
+  }
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0; padding: 20px 16px 120px;
+    font-family: "IM Fell English", Georgia, serif;
+    color: var(--frost);
+    background:
+      radial-gradient(1px 1px at 12% 18%, rgba(255,255,255,.7) 50%, transparent 51%),
+      radial-gradient(1px 1px at 78% 9%, rgba(255,255,255,.55) 50%, transparent 51%),
+      radial-gradient(1.5px 1.5px at 55% 24%, rgba(255,255,255,.6) 50%, transparent 51%),
+      radial-gradient(1px 1px at 90% 33%, rgba(255,255,255,.45) 50%, transparent 51%),
+      radial-gradient(1px 1px at 30% 6%, rgba(255,255,255,.5) 50%, transparent 51%),
+      radial-gradient(1px 1px at 66% 14%, rgba(255,255,255,.4) 50%, transparent 51%),
+      linear-gradient(115deg, transparent 30%, rgba(64,224,178,.10) 42%, rgba(120,180,255,.12) 52%, rgba(150,120,255,.10) 62%, transparent 75%),
+      linear-gradient(180deg, #0a1322 0%, #102036 38%, #1a3450 70%, #24435f 100%);
+    background-attachment: fixed;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── Mountain ranges ──────────────────── */
+  .range { position: fixed; left: 0; right: 0; bottom: 0; pointer-events: none; z-index: 0; }
+  .range.far {
+    height: 34vh; opacity: .8;
+    background: linear-gradient(180deg, #28486b, #1c3753);
+    clip-path: polygon(0 62%, 7% 38%, 13% 55%, 22% 18%, 28% 44%, 36% 30%, 45% 58%, 54% 18%, 60% 40%, 70% 10%, 78% 46%, 87% 26%, 94% 52%, 100% 34%, 100% 100%, 0 100%);
+  }
+  .range.near {
+    height: 24vh;
+    background: linear-gradient(180deg, #122942, #0d1a2c);
+    clip-path: polygon(0 45%, 9% 70%, 16% 30%, 26% 62%, 34% 22%, 43% 58%, 52% 38%, 63% 72%, 71% 26%, 80% 56%, 90% 34%, 100% 60%, 100% 100%, 0 100%);
+  }
+  .range.caps {
+    height: 34vh; opacity: .9;
+    background: #f0f6fc;
+    clip-path: polygon(20% 26%, 22% 18%, 24% 27%, 23% 30%, 21% 29%, 20% 26%);
+    filter: blur(.4px);
+  }
+
+  /* ── Snowfall ─────────────────────────── */
+  .flake {
+    position: fixed; top: -4vh; z-index: 2; pointer-events: none;
+    color: #fff; text-shadow: 0 0 4px rgba(255,255,255,.6);
+    animation: fall linear infinite;
+  }
+  @keyframes fall {
+    0% { transform: translateY(-5vh) translateX(0); }
+    50% { transform: translateY(50vh) translateX(var(--sway)); }
+    100% { transform: translateY(108vh) translateX(0); }
+  }
+
+  .content { position: relative; z-index: 3; }
+
+  /* ── Header ───────────────────────────── */
+  header { text-align: center; margin-bottom: 22px; }
+  header .ornament { color: #bfe0f5; font-size: 18px; letter-spacing: 10px; opacity: .95; text-shadow: 0 0 10px rgba(160,210,255,.7); }
+  h1 {
+    font-family: "Cinzel Decorative", "Cinzel", serif;
+    font-size: clamp(26px, 4.5vw, 40px);
+    margin: 6px 0 2px;
+    color: #f2f8ff;
+    letter-spacing: 2px;
+    text-shadow: 0 0 22px rgba(140,200,255,.5), 0 2px 0 rgba(0,0,0,.6);
+  }
+  h1 .gold { color: var(--accent); transition: color .4s; }
+  header .sub { color: #9dc0dd; font-style: italic; font-size: 15px; text-shadow: 0 1px 3px rgba(0,0,0,.5); }
+  header .rule { width: min(420px, 80%); height: 2px; margin: 10px auto 0; background: linear-gradient(90deg, transparent, #bfe0f5, transparent); opacity: .45; }
+
+  .layout { display: grid; grid-template-columns: 1fr 350px; gap: 18px; max-width: 1140px; margin: 0 auto; }
+  .side { position: sticky; top: 14px; align-self: start; max-height: calc(100vh - 28px); overflow-y: auto; scrollbar-width: thin; }
+  @media (max-width: 880px) { .layout { grid-template-columns: 1fr; } .side { position: static; max-height: none; } }
+
+  /* ── Tabs: hanging banners ────────────── */
+  .tabs { display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+  .tabs button {
+    font-family: "Cinzel", serif; font-weight: 700; font-size: 14px; letter-spacing: 1px;
+    background: linear-gradient(180deg, rgba(24,44,68,.92), rgba(14,28,46,.92));
+    color: #8fb3d1; border: 1px solid #33567c; border-top-width: 3px;
+    padding: 10px 20px 12px; cursor: pointer;
+    clip-path: polygon(0 0, 100% 0, 100% 78%, 50% 100%, 0 78%);
+    transition: all .2s;
+  }
+  .tabs button:hover { color: #eaf4fd; transform: translateY(2px); }
+  .tabs button.active {
+    background: linear-gradient(180deg, var(--tabc, var(--accent)) 0%, color-mix(in srgb, var(--tabc, var(--accent)) 55%, #06121f) 100%);
+    color: #0a1626; border-color: var(--tabc, var(--accent));
+    text-shadow: 0 1px 0 rgba(255,255,255,.3);
+  }
+
+  /* ── Advantage toggle: rune stones ────── */
+  .advrow { display: flex; gap: 8px; margin-bottom: 14px; }
+  .advrow .mode {
+    flex: 1; padding: 9px; cursor: pointer;
+    font-family: "Cinzel", serif; font-weight: 700; font-size: 13px; letter-spacing: 1px;
+    background: linear-gradient(180deg, rgba(20,38,60,.9), rgba(12,24,40,.9));
+    color: #7595b3; border: 1px solid #2c4d72; border-radius: 10px;
+    transition: all .2s;
+  }
+  .advrow .mode.on-norm { background: linear-gradient(180deg, #1d3a5e, #14263e); color: #eaf4fd; border-color: #5d8cb8; box-shadow: 0 0 14px rgba(93,140,184,.5); }
+  .advrow .mode.on-adv { background: linear-gradient(180deg, #163d2a, #0d2418); color: #8fdba4; border-color: #2f7d3f; box-shadow: 0 0 14px rgba(47,125,63,.55); }
+  .advrow .mode.on-dis { background: linear-gradient(180deg, #44201f, #2b1413); color: #e89c97; border-color: #9b2c2c; box-shadow: 0 0 14px rgba(155,44,44,.55); }
+
+  /* ── Frosted ice panels ───────────────── */
+  .panel {
+    position: relative;
+    background:
+      radial-gradient(ellipse 90% 60% at 50% 0%, rgba(255,255,255,.8), transparent 70%),
+      radial-gradient(ellipse 120% 100% at 50% 115%, rgba(90,140,185,.3), transparent 60%),
+      linear-gradient(160deg, var(--frost) 0%, var(--frost2) 70%, #bdd5ea 100%);
+    border: 1px solid var(--frost-edge);
+    outline: 3px double rgba(125,165,200,.6); outline-offset: -7px;
+    border-radius: 6px;
+    padding: 22px 18px 16px;
+    margin-bottom: 16px;
+    color: var(--ink);
+    box-shadow: 0 4px 20px rgba(2,10,22,.55), inset 0 0 36px rgba(150,190,225,.3);
+  }
+  /* snow drift on the top edge */
+  .panel::before {
+    content: ""; position: absolute; top: -7px; left: 6px; right: 6px; height: 14px;
+    background:
+      radial-gradient(14px 9px at 8% 100%, #fff 60%, transparent 61%),
+      radial-gradient(22px 10px at 22% 100%, #fdfeff 60%, transparent 61%),
+      radial-gradient(16px 8px at 36% 100%, #fff 60%, transparent 61%),
+      radial-gradient(26px 11px at 52% 100%, #fdfeff 60%, transparent 61%),
+      radial-gradient(15px 8px at 67% 100%, #fff 60%, transparent 61%),
+      radial-gradient(24px 10px at 82% 100%, #fdfeff 60%, transparent 61%),
+      radial-gradient(13px 8px at 95% 100%, #fff 60%, transparent 61%);
+    filter: drop-shadow(0 1px 1px rgba(120,160,200,.5));
+  }
+  .panel::after { content: "❄"; position: absolute; bottom: 4px; right: 10px; font-size: 12px; color: #8fb3d1; opacity: .8; }
+  .panel h2 {
+    font-family: "Cinzel", serif; font-weight: 700;
+    font-size: 13px; letter-spacing: 3px; text-transform: uppercase;
+    color: #2c5578; margin: 0 0 12px; text-align: center;
+  }
+  .panel h2::before { content: "❅ "; color: var(--frost-edge); }
+  .panel h2::after { content: " ❅"; color: var(--frost-edge); }
+
+  .flavor { text-align: center; font-style: italic; color: var(--ink-soft); font-size: 15px; margin: -4px 0 10px; }
+  .statline { text-align: center; font-size: 13.5px; color: var(--ink-soft); margin-bottom: 12px; }
+  .statline b { color: var(--ink); }
+  .notebox {
+    margin-top: 10px; padding: 8px 12px; font-size: 13px; font-style: italic; color: #34536f;
+    border-top: 1px solid rgba(125,165,200,.5);
+  }
+
+  /* ── Buttons: ice-rimed cards ─────────── */
+  .btngrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 8px; }
+  .btngrid.dice { grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); }
+  .roll-btn {
+    font-family: "IM Fell English", Georgia, serif;
+    background: linear-gradient(180deg, #ffffff, #ddebf7);
+    border: 1px solid #9cbeda; border-radius: 6px;
+    color: var(--ink); padding: 9px 6px; cursor: pointer; font-size: 15px; text-align: center;
+    box-shadow: 0 2px 0 #8aafd0, 0 3px 7px rgba(20,50,80,.25);
+    transition: transform .08s, box-shadow .08s;
+  }
+  .roll-btn:hover { background: linear-gradient(180deg, #ffffff, #ecf5fc); box-shadow: 0 2px 0 #8aafd0, 0 0 10px rgba(140,200,255,.6); }
+  .roll-btn:active { transform: translateY(2px); box-shadow: 0 0 0 #8aafd0, 0 1px 3px rgba(20,50,80,.3); }
+  .roll-btn small { display: block; color: #2c5578; font-size: 13.5px; font-weight: 700; margin-top: 2px; }
+  .roll-btn.atk { border-left: 4px solid var(--blood); }
+  .roll-btn.spell { border-left: 4px solid var(--arcane); }
+  .roll-btn .die-ico { font-size: 17px; display: block; line-height: 1; margin-bottom: 2px; color: #3e6ca5; }
+
+  /* ── Trackers ─────────────────────────── */
+  .tracker { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+  .tracker label { font-family: "Cinzel", serif; font-weight: 700; font-size: 12px; letter-spacing: 1px; color: #2c5578; min-width: 86px; }
+  .tracker .tbtn {
+    width: 30px; height: 30px; border-radius: 50%; cursor: pointer; font-size: 15px;
+    background: linear-gradient(180deg, #ffffff, #d7e8f5); border: 1px solid #9cbeda; color: var(--ink);
+    box-shadow: 0 2px 0 #8aafd0;
+  }
+  .tracker .tbtn:active { transform: translateY(2px); box-shadow: none; }
+  .hpwrap { flex: 1; min-width: 140px; position: relative; height: 26px; border-radius: 13px; border: 1px solid #7da5c8; background: #b9cfe2; overflow: hidden; box-shadow: inset 0 2px 5px rgba(20,50,80,.35); }
+  .hpfill {
+    height: 100%; border-radius: 12px 0 0 12px;
+    background-image: linear-gradient(180deg, rgba(255,255,255,.4), transparent 45%), linear-gradient(180deg, #c0392b, #7e1d12);
+    transition: width .35s ease;
+  }
+  .hpfill.healthy { background-image: linear-gradient(180deg, rgba(255,255,255,.4), transparent 45%), linear-gradient(180deg, #3f9b54, #1d5c2c); }
+  .hpfill.hurt { background-image: linear-gradient(180deg, rgba(255,255,255,.4), transparent 45%), linear-gradient(180deg, #d8902f, #97601a); }
+  .hptext {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    font-family: "Cinzel", serif; font-weight: 700; font-size: 15px; color: #fff;
+    text-shadow: 0 1px 2px rgba(0,0,0,.8); letter-spacing: 1px;
+  }
+  .pip {
+    width: 24px; height: 24px; cursor: pointer; padding: 0; border-radius: 50%;
+    border: 2px solid #2c5578;
+    background: radial-gradient(circle at 35% 30%, #fff8, transparent 45%), radial-gradient(circle, var(--accent), color-mix(in srgb, var(--accent) 50%, #06121f));
+    box-shadow: 0 0 9px var(--accent-soft), 0 2px 3px rgba(20,50,80,.4);
+    transition: all .2s;
+  }
+  .pip.used { background: #a8bccc; box-shadow: inset 0 2px 4px rgba(20,50,80,.45); opacity: .55; }
+  .pip.rage { background: radial-gradient(circle at 35% 30%, #ffd9, transparent 45%), radial-gradient(circle, #e25822, #7e1d12); box-shadow: 0 0 11px rgba(226,88,34,.65); }
+  .pip.rage.used { background: #a8bccc; box-shadow: inset 0 2px 4px rgba(20,50,80,.45); }
+
+  .diecell { display: flex; flex-direction: column; gap: 3px; }
+  .diecell .roll-btn { flex: 1; }
+  .minicast {
+    font-family: "Cinzel", serif; font-weight: 700; font-size: 10px; letter-spacing: 1px;
+    background: linear-gradient(180deg, #2e5d8c, #173a5e); color: #eaf4fd;
+    border: 1px solid #122c47; border-radius: 5px; padding: 3px 0; cursor: pointer;
+    box-shadow: 0 1px 0 #0d2236;
+  }
+  .minicast:active { transform: translateY(1px); box-shadow: none; }
+
+  /* ── Dice pool ────────────────────────── */
+  .poolrow { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; margin-top: 12px; min-height: 32px;
+    border-top: 1px dashed rgba(125,165,200,.5); padding-top: 11px; }
+  .poolhint { font-style: italic; color: #84a3bd; font-size: 13.5px; }
+  .chip {
+    font-family: "IM Fell English", Georgia, serif; font-size: 14px;
+    background: linear-gradient(180deg, #ffffff, #ddebf7); border: 1px solid #9cbeda;
+    color: var(--ink); border-radius: 14px; padding: 4px 12px; cursor: pointer;
+    box-shadow: 0 1px 0 #8aafd0;
+  }
+  .chip:hover { border-color: var(--blood); }
+  .chip.clear { background: none; box-shadow: none; border-style: dashed; color: var(--ink-soft); font-style: italic; }
+  .quickcast {
+    font-family: "Cinzel", serif; font-weight: 700; font-size: 12.5px; letter-spacing: 1px;
+    background: linear-gradient(180deg, #2e5d8c, #173a5e); color: #eaf4fd;
+    border: 1px solid #122c47; border-radius: 14px; padding: 6px 14px; cursor: pointer;
+    box-shadow: 0 2px 0 #0d2236;
+  }
+  .quickcast:active { transform: translateY(2px); box-shadow: none; }
+
+  /* ── Reroll ───────────────────────────── */
+  #reroll {
+    display: none; margin-top: 12px;
+    font-family: "Cinzel", serif; font-weight: 700; font-size: 12.5px; letter-spacing: 2px;
+    background: transparent; color: var(--accent); border: 1px solid var(--accent);
+    border-radius: 8px; padding: 6px 16px; cursor: pointer; transition: all .2s;
+  }
+  #reroll.on { display: inline-block; }
+  #reroll:hover { box-shadow: 0 0 12px var(--accent-soft); background: rgba(255,255,255,.04); }
+
+  /* ── Free roll ────────────────────────── */
+  .freeform { display: flex; gap: 8px; margin-top: 12px; }
+  .freeform input {
+    flex: 1; font-family: "IM Fell English", Georgia, serif; font-size: 15px;
+    background: #ffffff; border: 1px solid #9cbeda; border-radius: 6px;
+    color: var(--ink); padding: 9px 12px;
+    box-shadow: inset 0 2px 4px rgba(125,165,200,.3);
+  }
+  .freeform input::placeholder { color: #84a3bd; font-style: italic; }
+  .freeform button {
+    font-family: "Cinzel", serif; font-weight: 700; letter-spacing: 1px; font-size: 13px;
+    background: linear-gradient(180deg, #2e5d8c, #173a5e); color: #eaf4fd;
+    border: 1px solid #122c47; border-radius: 6px; padding: 9px 20px; cursor: pointer;
+    box-shadow: 0 2px 0 #0d2236, 0 3px 7px rgba(2,10,22,.4);
+  }
+  .freeform button:active { transform: translateY(2px); box-shadow: none; }
+
+  /* ── Result: the die of fate ──────────── */
+  #result {
+    position: relative; text-align: center; padding: 20px 12px 18px; margin-bottom: 16px;
+    border-radius: 6px; border: 1px solid #33567c;
+    background:
+      radial-gradient(1px 1px at 20% 30%, rgba(255,255,255,.55) 50%, transparent 51%),
+      radial-gradient(1px 1px at 80% 20%, rgba(255,255,255,.45) 50%, transparent 51%),
+      radial-gradient(1.5px 1.5px at 65% 75%, rgba(255,255,255,.35) 50%, transparent 51%),
+      linear-gradient(115deg, transparent 25%, rgba(64,224,178,.14) 45%, rgba(150,120,255,.12) 65%, transparent 85%),
+      radial-gradient(ellipse at 50% 0%, #1e3b5e, #0e1d31 70%);
+    box-shadow: 0 4px 20px rgba(2,10,22,.6), inset 0 0 32px rgba(0,0,0,.45);
+    min-height: 240px;
+  }
+  #result .label {
+    font-family: "Cinzel", serif; font-weight: 700; font-size: 14px; letter-spacing: 2px;
+    color: var(--accent); margin-bottom: 12px; min-height: 18px; transition: color .4s;
+  }
+  #die-stage { width: 256px; height: 236px; margin: 0 auto; }
+  #die-canvas { display: block; width: 100%; height: 100%; transition: filter .4s; }
+  #result.crit #die-canvas { filter: drop-shadow(0 0 24px rgba(255,225,120,.85)); animation: critpulse 1.4s ease-in-out 2; }
+  @keyframes critpulse { 50% { filter: drop-shadow(0 0 42px rgba(255,225,120,1)); } }
+  #result.fumble #die-canvas { filter: drop-shadow(0 0 18px rgba(170,60,50,.85)); }
+  .bonustag {
+    display: none; margin: 4px auto 0;
+    font-family: "Cinzel", serif; font-weight: 700; font-size: 12.5px; letter-spacing: 1.5px;
+    background: linear-gradient(180deg, var(--accent), color-mix(in srgb, var(--accent) 65%, #06121f));
+    color: #0d1322; border-radius: 11px; padding: 3px 13px;
+    box-shadow: 0 0 10px var(--accent-soft), 0 1px 2px rgba(0,0,0,.5);
+  }
+  .bonustag.on { display: inline-block; }
+  .banner {
+    font-family: "Cinzel Decorative", serif; font-size: 17px; font-weight: 700;
+    letter-spacing: 3px; margin-top: 10px; min-height: 22px;
+  }
+  .banner.crit { color: #ffe178; text-shadow: 0 0 16px rgba(255,225,120,.85); }
+  .banner.fumble { color: #e2685e; text-shadow: 0 0 12px rgba(170,60,50,.75); }
+  #result .extra { font-size: 18px; color: #dcecf8; margin-top: 4px; }
+  #result .extra b { color: var(--accent); font-size: 26px; }
+  #result .detail { color: #8fb3d1; font-size: 14px; margin-top: 8px; font-style: italic; }
+
+  /* ── Log: the chronicle ───────────────── */
+  #log { max-height: 380px; overflow-y: auto; padding-right: 4px; }
+  #log::-webkit-scrollbar { width: 6px; }
+  #log::-webkit-scrollbar-thumb { background: #9cbeda; border-radius: 3px; }
+  #flyer {
+    position: fixed; z-index: 60; pointer-events: none;
+    transform: translate(-50%, -50%);
+    transition: transform .75s cubic-bezier(.45,.05,.35,1), opacity .75s;
+    font-family: "Cinzel", serif; font-weight: 900; font-size: 62px; color: var(--accent);
+    text-shadow: 0 0 26px var(--accent-soft), 0 2px 5px rgba(0,0,0,.75);
+  }
+  #flyer span { display: inline-block; animation: flypop .45s ease-out; }
+  @keyframes flypop {
+    0% { transform: scale(.35); opacity: .15; }
+    60% { transform: scale(1.28); }
+    100% { transform: scale(1); opacity: 1; }
+  }
+  .logentry.new { animation: entryflash 1.1s ease-out; }
+  @keyframes entryflash {
+    0% { background: rgba(255,214,90,.5); }
+    100% { background: transparent; }
+  }
+  .logentry { border-bottom: 1px dashed rgba(125,165,200,.6); padding: 8px 2px; font-size: 14px; }
+  .logentry .who { font-style: italic; color: #2c5578; font-weight: 700; }
+  .logentry .tot { float: right; font-family: "Cinzel", serif; font-weight: 900; font-size: 21px; color: var(--ink); }
+  .logentry .det { color: var(--ink-soft); font-size: 13px; font-style: italic; }
+  .clearlog {
+    float: right; font-family: "IM Fell English", serif; font-style: italic; font-size: 12px;
+    background: none; border: 1px solid #9cbeda; color: var(--ink-soft); border-radius: 5px; padding: 3px 10px; cursor: pointer;
+  }
+  footer { position: relative; z-index: 3; text-align: center; margin-top: 26px; color: #7d9fc0; font-style: italic; font-size: 13px; text-shadow: 0 1px 3px rgba(0,0,0,.6); }
+</style>
+</head>
+<body>
+
+<div class="range far"></div>
+<div class="range near"></div>
+
+<div class="content">
+<header>
+  <div class="ornament">❄ ⛰ ❄</div>
+  <h1>THE PROVING OF <span class="gold">MOUNT VAEL</span></h1>
+  <div class="sub">Millhaven Guild Lodge · let the dice fall where the snow drifts</div>
+  <div class="rule"></div>
+</header>
+
+<div class="layout">
+  <div>
+    <div class="tabs" id="tabs"></div>
+    <div class="advrow">
+      <button class="mode on-norm" id="m-norm" onclick="setMode('norm')">❅ Normal</button>
+      <button class="mode" id="m-adv" onclick="setMode('adv')">▲ Advantage</button>
+      <button class="mode" id="m-dis" onclick="setMode('dis')">▼ Disadvantage</button>
+    </div>
+    <div id="sheet"></div>
+    <div class="panel">
+      <h2>Loose Dice</h2>
+      <div class="btngrid dice">
+        <div class="diecell"><button class="roll-btn" onclick="addDie(4)"><span class="die-ico">▲</span>d4</button><button class="minicast" onclick="freeDie(4)">cast</button></div>
+        <div class="diecell"><button class="roll-btn" onclick="addDie(6)"><span class="die-ico">⬛</span>d6</button><button class="minicast" onclick="freeDie(6)">cast</button></div>
+        <div class="diecell"><button class="roll-btn" onclick="addDie(8)"><span class="die-ico">◆</span>d8</button><button class="minicast" onclick="freeDie(8)">cast</button></div>
+        <div class="diecell"><button class="roll-btn" onclick="addDie(10)"><span class="die-ico">◈</span>d10</button><button class="minicast" onclick="freeDie(10)">cast</button></div>
+        <div class="diecell"><button class="roll-btn" onclick="addDie(12)"><span class="die-ico">⬟</span>d12</button><button class="minicast" onclick="freeDie(12)">cast</button></div>
+        <div class="diecell"><button class="roll-btn" onclick="addDie(20)"><span class="die-ico">⬢</span>d20</button><button class="minicast" onclick="freeDie(20)">cast</button></div>
+      </div>
+      <div class="poolrow" id="pool"></div>
+      <div class="freeform">
+        <input id="formula" placeholder="speak thy formula… 2d6+3, 1d20+5" onkeydown="if(event.key==='Enter')rollFormula()">
+        <button onclick="rollFormula()">CAST</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="side">
+    <div id="result">
+      <div class="label" id="r-label">THE WARDEN IS WATCHING</div>
+      <div id="die-stage"><canvas id="die-canvas"></canvas></div>
+      <div class="bonustag" id="r-bonus"></div>
+      <div class="banner" id="r-banner"></div>
+      <div class="extra" id="r-extra"></div>
+      <div class="detail" id="r-detail">Choose thy deed. The mountain remembers what the valleys have forgotten.</div>
+      <button id="reroll" onclick="reroll()">⟳ ROLL AGAIN</button>
+    </div>
+    <div class="panel">
+      <h2><span id="logowner">The Warden's Journal</span> <button class="clearlog" onclick="clearLog()">let it snow over</button></h2>
+      <div id="log"></div>
+    </div>
+  </div>
+</div>
+
+<footer>❄ compiled from Guild Archive ref. PA-7731 · the Hearthstone Inn keeps the fire lit ❄</footer>
+</div>
+
+<script>
+const CHARS = {
+  paco: {
+    name: "Paco", emblem: "⚙", color: "#e09a3c",
+    flavor: "Rock Gnome Artificer · bending the Veil with brass and care",
+    line: "Artificer 2 · AC 14 (<b>15</b> w/ Enhanced Defense) · Speed 25 · Spell DC <b>13</b>",
+    hpMax: 17, slots: 2, init: 2,
+    attacks: [
+      { n: "Spark (Fire Bolt)", hit: 5, dmg: "1d10", type: "fire", cls: "spell" },
+      { n: "Catapult · DEX 13", hit: null, dmg: "3d8", type: "bludgeoning", cls: "spell" },
+      { n: "Light crossbow", hit: 4, dmg: "1d8+2", type: "piercing", cls: "atk" },
+      { n: "Dagger", hit: 4, dmg: "1d4+2", type: "piercing", cls: "atk" },
+      { n: "Cure Wounds", hit: null, dmg: "1d8+3", type: "healing", cls: "spell" },
+    ],
+    saves: { "Strength": -1, "Dexterity": 2, "Constitution": 4, "Intelligence": 5, "Wisdom": 1, "Charisma": 0 },
+    skills: { "Acrobatics": 2, "Animal Handling": 1, "Arcana": 5, "Athletics": -1, "Deception": 0, "History": 3, "History (magic/tech)": 5, "Insight": 3, "Intimidation": 0, "Investigation": 5, "Medicine": 1, "Nature": 3, "Perception": 1, "Performance": 0, "Persuasion": 2, "Religion": 0, "Sleight of Hand": 2, "Stealth": 2, "Survival": 1, "Tinker's Tools": 5, "Thieves' Tools": 4 },
+    note: "Gnome Cunning: advantage on INT/WIS/CHA saves vs magic. Faerie Fire: foes save DEX vs DC 13, no roll for thee."
+  },
+  ray: {
+    name: "Ray", emblem: "🏹", color: "#7fb069",
+    flavor: "Wood Elf Ranger · silent as snowfall on the Shale Flats",
+    line: "Ranger 2 · AC 15 · Speed 35 · Spell DC <b>12</b>",
+    hpMax: 20, slots: 2, init: 3,
+    attacks: [
+      { n: "Longbow", hit: 7, dmg: "1d8+3", type: "piercing", cls: "atk" },
+      { n: "Longbow + Hunter's Mark", hit: 7, dmg: "1d8+3+1d6", type: "piercing", cls: "atk" },
+      { n: "Shortsword", hit: 5, dmg: "1d6+3", type: "piercing", cls: "atk" },
+      { n: "Handaxe (thrown)", hit: 5, dmg: "1d6+3", type: "slashing", cls: "atk" },
+      { n: "Goodberry · 4 × 1 HP", hit: null, dmg: null, type: "utility", cls: "spell" },
+    ],
+    saves: { "Strength": 3, "Dexterity": 5, "Constitution": 2, "Intelligence": 0, "Wisdom": 2, "Charisma": -1 },
+    skills: { "Acrobatics": 3, "Animal Handling": 2, "Arcana": 0, "Athletics": 3, "Deception": -1, "History": 0, "Insight": 2, "Intimidation": -1, "Investigation": 0, "Medicine": 2, "Nature": 2, "Perception": 4, "Performance": -1, "Persuasion": -1, "Religion": 0, "Sleight of Hand": 3, "Stealth": 5, "Survival": 4 },
+    note: "Fey Ancestry: advantage vs charm. Mask of the Wild: hide in fog, mist, and sleet."
+  },
+  odinson: {
+    name: "Odinson", emblem: "🪓", color: "#8fb4dd",
+    flavor: "Goliath Barbarian · the avalanche of the Thornback Reaches",
+    line: "Barbarian 2 · AC 13 (<b>15</b> w/ shield) · Speed 30 · <b>cold resistance</b>",
+    hpMax: 23, slots: 0, rage: 2, init: 1,
+    attacks: [
+      { n: "Greataxe", hit: 5, dmg: "1d12+3", type: "slashing", cls: "atk" },
+      { n: "Greataxe (RAGING)", hit: 5, dmg: "1d12+5", type: "slashing", cls: "atk" },
+      { n: "Battleaxe", hit: 5, dmg: "1d8+3", type: "slashing", cls: "atk" },
+      { n: "Battleaxe (RAGING)", hit: 5, dmg: "1d8+5", type: "slashing", cls: "atk" },
+      { n: "Handaxe (thrown)", hit: 5, dmg: "1d6+3", type: "slashing", cls: "atk" },
+      { n: "Stone's Endurance", hit: null, dmg: "1d12+2", type: "damage soaked", cls: "spell" },
+    ],
+    saves: { "Strength": 5, "Dexterity": 1, "Constitution": 4, "Intelligence": 0, "Wisdom": 1, "Charisma": -1 },
+    skills: { "Acrobatics": 1, "Animal Handling": 3, "Arcana": 0, "Athletics": 5, "Deception": -1, "History": 0, "Insight": 1, "Intimidation": 1, "Investigation": 0, "Medicine": 1, "Nature": 0, "Perception": 1, "Performance": -1, "Persuasion": -1, "Religion": 0, "Sleight of Hand": 1, "Stealth": 1, "Survival": 3 },
+    note: "Reckless Attack: strike with advantage, but foes strike thee likewise. Danger Sense: advantage on DEX saves thou canst see. Raging: resist bludgeoning, piercing, slashing. Mountain Born: the cold is home."
+  }
+};
+
+let mode = "norm";
+let current = "paco";
+const state = JSON.parse(localStorage.getItem("diceTableState") || "{}");
+for (const k in CHARS) {
+  if (!state[k]) state[k] = { hp: CHARS[k].hpMax, used: 0, rageUsed: 0 };
+}
+function save() { localStorage.setItem("diceTableState", JSON.stringify(state)); }
+
+const logs = JSON.parse(localStorage.getItem("diceTableLogs") || "{}");
+for (const k in CHARS) {
+  if (!Array.isArray(logs[k])) logs[k] = [];
+}
+function saveLogs() { localStorage.setItem("diceTableLogs", JSON.stringify(logs)); }
+
+const lastRolls = JSON.parse(localStorage.getItem("diceTableLast") || "{}");
+function saveLast() { localStorage.setItem("diceTableLast", JSON.stringify(lastRolls)); }
+
+const lastActions = JSON.parse(localStorage.getItem("diceTableActions") || "{}");
+function record(act) {
+  lastActions[current] = act;
+  localStorage.setItem("diceTableActions", JSON.stringify(lastActions));
+  updateRerollBtn();
+}
+function updateRerollBtn() {
+  document.getElementById("reroll").className = lastActions[current] ? "on" : "";
+}
+function reroll() {
+  const a = lastActions[current];
+  if (!a) return;
+  if (a.a === "attack") attack(a.c, a.i);
+  else if (a.a === "check") check(a.c, a.l, a.m);
+  else if (a.a === "free") freeDie(a.n);
+  else doFormula(a.f, a.label);
+}
+
+function applyTheme() {
+  const c = CHARS[current];
+  document.documentElement.style.setProperty("--accent", c.color);
+  document.documentElement.style.setProperty("--accent-soft", c.color + "44");
+  window.__dieColor = c.color;
+  if (window.DIE && window.DIE.ready) window.DIE.setColor(c.color);
+}
+
+function setMode(m) {
+  mode = m;
+  for (const x of ["norm", "adv", "dis"]) {
+    const b = document.getElementById("m-" + x);
+    b.className = "mode" + (x === m ? " on-" + m : "");
+  }
+}
+
+function d(n) { return Math.floor(Math.random() * n) + 1; }
+
+function rollD20(modifier) {
+  const a = d(20), b = d(20);
+  let pick = a, other = null;
+  if (mode === "adv") { pick = Math.max(a, b); other = Math.min(a, b); }
+  if (mode === "dis") { pick = Math.min(a, b); other = Math.max(a, b); }
+  return { nat: pick, other, total: pick + modifier };
+}
+
+function parseDice(expr) {
+  const parts = expr.replace(/\s/g, "").replace(/-/g, "+-").split("+").filter(Boolean);
+  const rolls = []; let total = 0; let flat = 0;
+  for (const p of parts) {
+    const m = p.match(/^(-?\d*)d(\d+)$/);
+    if (m) {
+      const count = Math.abs(parseInt(m[1] || "1", 10)) || 1;
+      const sides = parseInt(m[2], 10);
+      for (let i = 0; i < count; i++) { const r = d(sides); rolls.push("d" + sides + ":" + r); total += r; }
+    } else {
+      const v = parseInt(p, 10);
+      if (isNaN(v)) return null;
+      flat += v;
+    }
+  }
+  return { total: total + flat, rolls, flat };
+}
+
+function doubleDice(expr) {
+  return expr.replace(/(\d*)d(\d+)/g, (_, c, s) => ((parseInt(c || "1", 10)) * 2) + "d" + s);
+}
+
+function fmtMod(m) { return m ? (m > 0 ? "+" + m : "−" + Math.abs(m)) : ""; }
+function diceItems(rolls) {
+  return rolls.map(s => {
+    const m = s.match(/^d(\d+):(\d+)$/);
+    return { sides: parseInt(m[1], 10), value: parseInt(m[2], 10) };
+  });
+}
+
+let settleTimer = null;
+function show(label, total, detail, extra, crit, sides, multi, bonus, dieValue) {
+  clearTimeout(settleTimer);
+  const who = current;
+  sides = sides || 20;
+  const entry = { t: total, w: label, d: detail + (extra ? " · " + extra.replace(/<[^>]*>/g, "") : "") };
+  lastRolls[who] = { label, total, detail, extra: extra || "", crit: crit || null, sides,
+    bonus: bonus || null, dieValue: dieValue != null ? dieValue : null };
+  saveLast();
+  const r = document.getElementById("result");
+  const banner = document.getElementById("r-banner");
+  const bonusEl = document.getElementById("r-bonus");
+  r.className = "";
+  document.getElementById("r-label").textContent = label.toUpperCase();
+  banner.className = "banner"; banner.textContent = "";
+  bonusEl.className = "bonustag"; bonusEl.textContent = "";
+  document.getElementById("r-extra").innerHTML = "";
+  document.getElementById("r-detail").textContent = "the die tumbles across the ice…";
+  const reveal = (extraHtml) => {
+    if (current !== who) { commitEntry(who, entry); return; } /* user switched tabs mid-roll */
+    r.className = crit === "crit" ? "crit" : crit === "fumble" ? "fumble" : "";
+    banner.className = "banner " + (crit || "");
+    banner.textContent = crit === "crit" ? "✦ THE VEIL ANSWERS ✦" : crit === "fumble" ? "❄ THE MOUNTAIN TAKES ❄" : "";
+    if (bonus) { bonusEl.textContent = bonus; bonusEl.className = "bonustag on"; }
+    document.getElementById("r-extra").innerHTML = extraHtml;
+    document.getElementById("r-detail").innerHTML = detail;
+    flyToJournal(total, who, entry);
+  };
+  if (window.DIE && window.DIE.ready) {
+    if (multi && multi.length > 1) window.DIE.rollMulti(multi, () => reveal(extra || ""));
+    else window.DIE.roll(String(dieValue != null ? dieValue : total), crit, () => reveal(extra || ""), sides);
+  } else {
+    settleTimer = setTimeout(() => reveal(`<b>${total}</b>${extra ? " · " + extra : ""}`), 250);
+  }
+}
+
+function commitEntry(who, entry) {
+  logs[who].unshift(entry);
+  if (logs[who].length > 80) logs[who].length = 80;
+  saveLogs();
+  if (current === who) {
+    renderLog();
+    const first = document.querySelector("#log .logentry");
+    if (first) first.classList.add("new");
+  }
+}
+
+let activeFlyer = null;
+function flyToJournal(total, who, entry) {
+  if (activeFlyer) activeFlyer(); /* land the previous one instantly */
+  const stage = document.getElementById("die-stage").getBoundingClientRect();
+  const logR = document.getElementById("log").getBoundingClientRect();
+  const fl = document.createElement("div");
+  fl.id = "flyer";
+  fl.innerHTML = `<span>${total}</span>`;
+  fl.style.left = (stage.left + stage.width / 2) + "px";
+  fl.style.top = (stage.top + stage.height / 2) + "px";
+  document.body.appendChild(fl);
+  let done = false;
+  const finish = () => {
+    if (done) return;
+    done = true;
+    fl.remove();
+    activeFlyer = null;
+    commitEntry(who, entry);
+  };
+  activeFlyer = finish;
+  setTimeout(() => {
+    const dx = (logR.left + 46) - (stage.left + stage.width / 2);
+    const dy = (logR.top + 16) - (stage.top + stage.height / 2);
+    fl.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px)) scale(.3)`;
+    fl.style.opacity = ".75";
+    setTimeout(finish, 800);
+  }, 500);
+}
+
+function displayLast() {
+  clearTimeout(settleTimer);
+  const lr = lastRolls[current];
+  const r = document.getElementById("result");
+  const banner = document.getElementById("r-banner");
+  const bonusEl = document.getElementById("r-bonus");
+  r.className = "";
+  if (!lr) {
+    document.getElementById("r-label").textContent = "THE WARDEN IS WATCHING";
+    banner.className = "banner"; banner.textContent = "";
+    bonusEl.className = "bonustag"; bonusEl.textContent = "";
+    document.getElementById("r-extra").innerHTML = "";
+    document.getElementById("r-detail").textContent = "Choose thy deed. The mountain remembers what the valleys have forgotten.";
+    if (window.DIE && window.DIE.ready) window.DIE.showValue("?", 20);
+    updateRerollBtn();
+    return;
+  }
+  document.getElementById("r-label").textContent = lr.label.toUpperCase();
+  banner.className = "banner " + (lr.crit || "");
+  banner.textContent = lr.crit === "crit" ? "✦ THE VEIL ANSWERS ✦" : lr.crit === "fumble" ? "❄ THE MOUNTAIN TAKES ❄" : "";
+  bonusEl.textContent = lr.bonus || "";
+  bonusEl.className = "bonustag" + (lr.bonus ? " on" : "");
+  document.getElementById("r-extra").innerHTML = lr.extra || (window.DIE && window.DIE.ready ? "" : `<b>${lr.total}</b>`);
+  document.getElementById("r-detail").innerHTML = lr.detail;
+  if (window.DIE && window.DIE.ready) window.DIE.showValue(String(lr.dieValue != null ? lr.dieValue : lr.total), lr.sides || 20);
+  updateRerollBtn();
+}
+
+function renderLog() {
+  const owner = document.getElementById("logowner");
+  owner.textContent = CHARS[current].name + "'s Journal";
+  document.getElementById("log").innerHTML = logs[current].map(e =>
+    `<div class="logentry"><span class="tot">${e.t}</span><span class="who">${e.w}</span><div class="det">${e.d}</div></div>`).join("");
+}
+
+function attack(charKey, i) {
+  record({ a: "attack", c: charKey, i });
+  const c = CHARS[charKey], a = c.attacks[i];
+  if (a.hit === null && a.dmg === null) { show(c.name + " · " + a.n, "✓", "No roll needed", "", null, 20); return; }
+  if (a.hit === null) {
+    const dm = parseDice(a.dmg);
+    const items = diceItems(dm.rolls);
+    show(c.name + " · " + a.n, dm.total, a.dmg + " " + a.type + " [" + dm.rolls.join(", ") + "]", "", null,
+      items[0].sides, items.length > 1 ? items : null, fmtMod(dm.flat) || null,
+      items.length === 1 ? items[0].value : null);
+    return;
+  }
+  const atk = rollD20(a.hit);
+  const isCrit = atk.nat === 20, isFumble = atk.nat === 1;
+  const dmgExpr = isCrit ? doubleDice(a.dmg) : a.dmg;
+  const dm = parseDice(dmgExpr);
+  const dmgItems = diceItems(dm.rolls);
+  let extra = isFumble ? "the blow vanishes into the blizzard…" : `damage: <b>${dm.total}</b> ${a.type}${isCrit ? " · dice doubled!" : ""}`;
+  let detail = `to hit: d20(${atk.nat})${atk.other !== null ? " | " + atk.other : ""} ${a.hit >= 0 ? "+" : ""}${a.hit}`;
+  if (!isFumble) detail += ` · dmg ${dmgExpr} [${dm.rolls.join(", ")}]`;
+  let bonus = fmtMod(a.hit) ? fmtMod(a.hit) + " to hit" : "";
+  if (!isFumble && fmtMod(dm.flat)) bonus += (bonus ? " · " : "") + fmtMod(dm.flat) + " dmg";
+  const multi = isFumble ? null : [{ sides: 20, value: atk.nat }].concat(dmgItems);
+  show(c.name + " · " + a.n, atk.total, detail, extra, isCrit ? "crit" : isFumble ? "fumble" : null, 20,
+    multi, bonus || null, atk.nat);
+}
+
+function check(charKey, label, modifier) {
+  record({ a: "check", c: charKey, l: label, m: modifier });
+  const c = CHARS[charKey];
+  const r = rollD20(modifier);
+  const crit = r.nat === 20 ? "crit" : r.nat === 1 ? "fumble" : null;
+  show(c.name + " · " + label, r.total,
+    `d20(${r.nat})${r.other !== null ? " | " + r.other : ""} ${modifier >= 0 ? "+" : ""}${modifier}` + (mode !== "norm" ? " · " + mode : ""),
+    "", crit, 20, null, fmtMod(modifier) || null, r.nat);
+}
+
+function freeDie(n) {
+  record({ a: "free", n });
+  if (n === 20) { const r = rollD20(0); show("Loose d20", r.total, `d20(${r.nat})${r.other !== null ? " | " + r.other : ""}`, "", r.nat === 20 ? "crit" : r.nat === 1 ? "fumble" : null, 20); return; }
+  show("Loose d" + n, d(n), "1d" + n, "", null, n);
+}
+
+function rollFormula() {
+  const f = document.getElementById("formula").value.trim();
+  if (!f) return;
+  record({ a: "formula", f });
+  doFormula(f);
+}
+
+function doFormula(f, label) {
+  const r = parseDice(f);
+  if (!r) { show("Formula", "?", "The runes resist reading: " + f, "", null, 20); return; }
+  const items = diceItems(r.rolls);
+  show(label || f, r.total, "[" + r.rolls.join(", ") + "]" + (r.flat ? " + " + r.flat : ""), "", null,
+    items.length ? items[0].sides : 20, items.length > 1 ? items : null, fmtMod(r.flat) || null,
+    items.length === 1 ? items[0].value : null);
+}
+
+/* ── dice pool ── */
+let pool = {};
+function addDie(n) { pool[n] = (pool[n] || 0) + 1; renderPool(); }
+function removeDie(n) { pool[n]--; if (!pool[n]) delete pool[n]; renderPool(); }
+function clearPool() { pool = {}; renderPool(); }
+function poolSpec() {
+  return Object.keys(pool).map(Number).sort((a, b) => b - a).map(n => pool[n] + "d" + n).join("+");
+}
+function renderPool() {
+  const el = document.getElementById("pool");
+  const spec = poolSpec();
+  if (!spec) { el.innerHTML = `<span class="poolhint">tap dice above to gather a handful…</span>`; return; }
+  el.innerHTML = Object.keys(pool).map(Number).sort((a, b) => b - a).map(n =>
+    `<button class="chip" title="remove one" onclick="removeDie(${n})">${pool[n]}×d${n} ✕</button>`).join("") +
+    `<button class="quickcast" onclick="castPool()">⚡ CAST ${spec}</button>` +
+    `<button class="chip clear" onclick="clearPool()">empty hand</button>`;
+}
+function castPool() {
+  const spec = poolSpec();
+  if (!spec) return;
+  record({ a: "pool", f: spec, label: "Handful · " + spec });
+  doFormula(spec, "Handful · " + spec);
+}
+
+function hpChange(charKey, delta) {
+  const s = state[charKey];
+  s.hp = Math.max(0, Math.min(CHARS[charKey].hpMax, s.hp + delta));
+  save(); renderSheet();
+}
+function toggleSlot(charKey, idx) {
+  const s = state[charKey];
+  s.used = (idx < s.used) ? idx : idx + 1;
+  save(); renderSheet();
+}
+function toggleRage(charKey, idx) {
+  const s = state[charKey];
+  s.rageUsed = (idx < s.rageUsed) ? idx : idx + 1;
+  save(); renderSheet();
+}
+
+function renderSheet() {
+  const c = CHARS[current], s = state[current];
+  const pct = Math.round((s.hp / c.hpMax) * 100);
+  const hpClass = pct > 60 ? "healthy" : pct > 30 ? "hurt" : "";
+  let html = `<div class="panel"><h2>${c.emblem} ${c.name} ${c.emblem}</h2>
+    <div class="flavor">${c.flavor}</div>
+    <div class="statline">${c.line}</div>`;
+  html += `<div class="tracker"><label>VITALITY</label>
+    <button class="tbtn" onclick="hpChange('${current}',-5)">−5</button><button class="tbtn" onclick="hpChange('${current}',-1)">−1</button>
+    <div class="hpwrap"><div class="hpfill ${hpClass}" style="width:${pct}%"></div><div class="hptext">${s.hp} / ${c.hpMax}</div></div>
+    <button class="tbtn" onclick="hpChange('${current}',1)">+1</button><button class="tbtn" onclick="hpChange('${current}',5)">+5</button></div>`;
+  if (c.slots) {
+    html += `<div class="tracker"><label>VEIL RESERVES</label>`;
+    for (let i = 0; i < c.slots; i++) html += `<button class="pip ${i < s.used ? "used" : ""}" title="1st level slot" onclick="toggleSlot('${current}',${i})"></button>`;
+    html += `</div>`;
+  }
+  if (c.rage) {
+    html += `<div class="tracker"><label>RAGE</label>`;
+    for (let i = 0; i < c.rage; i++) html += `<button class="pip rage ${i < s.rageUsed ? "used" : ""}" title="Rage" onclick="toggleRage('${current}',${i})"></button>`;
+    html += `</div>`;
+  }
+  html += `<div class="notebox">${c.note}</div></div>`;
+
+  html += `<div class="panel"><h2>Deeds of Battle</h2><div class="btngrid">`;
+  html += `<button class="roll-btn" onclick="check('${current}','Initiative',${c.init})">⚡ Initiative<small>${c.init >= 0 ? "+" : ""}${c.init}</small></button>`;
+  c.attacks.forEach((a, i) => {
+    html += `<button class="roll-btn ${a.cls}" onclick="attack('${current}',${i})">${a.n}<small>${a.hit !== null ? (a.hit >= 0 ? "+" : "") + a.hit + " · " : ""}${a.dmg || ""}</small></button>`;
+  });
+  html += `</div></div>`;
+
+  html += `<div class="panel"><h2>Saving Throws</h2><div class="btngrid">`;
+  for (const [k, v] of Object.entries(c.saves)) {
+    html += `<button class="roll-btn" onclick="check('${current}','${k} save',${v})">${k}<small>${v >= 0 ? "+" : ""}${v}</small></button>`;
+  }
+  html += `</div></div>`;
+
+  html += `<div class="panel"><h2>Talents & Lore</h2><div class="btngrid">`;
+  for (const [k, v] of Object.entries(c.skills)) {
+    html += `<button class="roll-btn" onclick="check('${current}','${k.replace(/'/g, "\\'")}',${v})">${k}<small>${v >= 0 ? "+" : ""}${v}</small></button>`;
+  }
+  html += `</div></div>`;
+  document.getElementById("sheet").innerHTML = html;
+}
+
+function renderTabs() {
+  const t = document.getElementById("tabs");
+  t.innerHTML = Object.keys(CHARS).map(k =>
+    `<button class="${k === current ? "active" : ""}" style="--tabc:${CHARS[k].color}" onclick="current='${k}';applyTheme();renderTabs();renderSheet();renderLog();displayLast()">${CHARS[k].emblem} ${CHARS[k].name}</button>`).join("");
+}
+function clearLog() { logs[current] = []; saveLogs(); renderLog(); }
+
+/* ── Snowfall ── */
+(function snow() {
+  const glyphs = ["❄", "❅", "•", "✦", "·"];
+  for (let i = 0; i < 38; i++) {
+    const f = document.createElement("span");
+    f.className = "flake";
+    f.textContent = glyphs[Math.floor(Math.random() * glyphs.length)];
+    f.style.left = Math.random() * 100 + "vw";
+    f.style.fontSize = (7 + Math.random() * 11) + "px";
+    f.style.opacity = (0.35 + Math.random() * 0.55).toFixed(2);
+    f.style.setProperty("--sway", (Math.random() * 70 - 35).toFixed(0) + "px");
+    f.style.animationDuration = (8 + Math.random() * 14).toFixed(1) + "s";
+    f.style.animationDelay = (-Math.random() * 20).toFixed(1) + "s";
+    document.body.appendChild(f);
+  }
+})();
+
+applyTheme();
+renderTabs();
+renderSheet();
+renderLog();
+renderPool();
+updateRerollBtn();
+window.addEventListener("load", () => { setTimeout(displayLast, 150); });
+</script>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+try {
+  const THREE = await import('three');
+
+  const canvas = document.getElementById('die-canvas');
+  const W = 256, H = 236;
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+  renderer.setSize(W, H, false);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.1;
+
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(36, W / H, 0.1, 50);
+  camera.position.set(0, 1.35, 4.3);
+  camera.lookAt(0, -0.15, 0);
+
+  scene.add(new THREE.HemisphereLight(0xdde9f5, 0x32363f, 1.15));
+  scene.add(new THREE.AmbientLight(0xffffff, 0.25));
+
+  const key = new THREE.DirectionalLight(0xfff2dd, 2.0);
+  key.position.set(2.5, 5, 3.5);
+  key.castShadow = true;
+  key.shadow.mapSize.set(1024, 1024);
+  key.shadow.radius = 6;
+  scene.add(key);
+  const rim = new THREE.DirectionalLight(0x9fc8ff, 1.1);
+  rim.position.set(-3, 2, -3);
+  scene.add(rim);
+
+  const ground = new THREE.Mesh(
+    new THREE.CircleGeometry(3, 48).rotateX(-Math.PI / 2),
+    new THREE.ShadowMaterial({ opacity: 0.38 })
+  );
+  ground.position.y = -1.45;
+  ground.receiveShadow = true;
+  scene.add(ground);
+
+  /* ── number atlas (shared canvas, grid depends on shape) ── */
+  const AT = 1024;
+  const atlas = document.createElement('canvas');
+  atlas.width = atlas.height = AT;
+  const actx = atlas.getContext('2d');
+  const texture = new THREE.CanvasTexture(atlas);
+  texture.anisotropy = 8;
+  texture.colorSpace = THREE.SRGBColorSpace;
+
+  const VA = new THREE.Vector3(), VB = new THREE.Vector3(), VC = new THREE.Vector3(), VP = new THREE.Vector3();
+
+  /* pentagonal trapezohedron for the d10 */
+  function buildD10Geo(scale) {
+    const ring = [];
+    for (let i = 0; i < 10; i++) {
+      const a = Math.PI * 2 * i / 10;
+      ring.push(new THREE.Vector3(Math.cos(a) * scale, Math.sin(a) * scale, (i % 2 === 0 ? 1 : -1) * 0.105 * scale));
+    }
+    const top = new THREE.Vector3(0, 0, scale), bot = new THREE.Vector3(0, 0, -scale);
+    const posArr = [];
+    const pushTri = (a, b, c) => {
+      const n = b.clone().sub(a).cross(c.clone().sub(a));
+      if (n.dot(a.clone().add(b).add(c)) < 0) { const t = b; b = c; c = t; }
+      posArr.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
+    };
+    const faceTris = [];
+    let t = 0;
+    for (let k = 0; k < 5; k++) {
+      pushTri(top, ring[2 * k], ring[(2 * k + 1) % 10]);
+      pushTri(top, ring[(2 * k + 1) % 10], ring[(2 * k + 2) % 10]);
+      faceTris.push([t, t + 1]); t += 2;
+    }
+    for (let k = 0; k < 5; k++) {
+      pushTri(bot, ring[(2 * k + 1) % 10], ring[(2 * k + 2) % 10]);
+      pushTri(bot, ring[(2 * k + 2) % 10], ring[(2 * k + 3) % 10]);
+      faceTris.push([t, t + 1]); t += 2;
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(posArr), 3));
+    return { geo: g, faceTris };
+  }
+
+  /* generic: take any convex polyhedron, find logical faces, give each its atlas cell */
+  function buildShape(sides) {
+    let geo = null, faceTris = null, fontScale = 0.34;
+    if (sides === 4) { geo = new THREE.TetrahedronGeometry(1.5); fontScale = 0.3; }
+    else if (sides === 6) { geo = new THREE.BoxGeometry(1.75, 1.75, 1.75); fontScale = 0.45; }
+    else if (sides === 8) { geo = new THREE.OctahedronGeometry(1.45); }
+    else if (sides === 10) { const r = buildD10Geo(1.35); geo = r.geo; faceTris = r.faceTris; fontScale = 0.3; }
+    else if (sides === 12) { geo = new THREE.DodecahedronGeometry(1.4); fontScale = 0.4; }
+    else { geo = new THREE.IcosahedronGeometry(1.32); }
+    if (geo.index) geo = geo.toNonIndexed();
+    const pos = geo.getAttribute('position');
+    const triCount = pos.count / 3;
+    if (!faceTris) {
+      const groups = [];
+      for (let t = 0; t < triCount; t++) {
+        VA.fromBufferAttribute(pos, t * 3); VB.fromBufferAttribute(pos, t * 3 + 1); VC.fromBufferAttribute(pos, t * 3 + 2);
+        const n = VB.clone().sub(VA).cross(VC.clone().sub(VA)).normalize();
+        let g = groups.find(g => g.n.dot(n) > 0.99);
+        if (!g) { g = { n: n.clone(), tris: [] }; groups.push(g); }
+        g.tris.push(t);
+      }
+      faceTris = groups.map(g => g.tris);
+    }
+    const cols = Math.ceil(Math.sqrt(faceTris.length * 1.25));
+    const rows = Math.ceil(faceTris.length / cols);
+    const uvs = new Float32Array(pos.count * 2);
+    const normals = [], basisV = [], numPos = [];
+    faceTris.forEach((tris, fi) => {
+      const n = new THREE.Vector3();
+      for (const t of tris) {
+        VA.fromBufferAttribute(pos, t * 3); VB.fromBufferAttribute(pos, t * 3 + 1); VC.fromBufferAttribute(pos, t * 3 + 2);
+        n.add(VB.clone().sub(VA).cross(VC.clone().sub(VA)).normalize());
+      }
+      n.normalize();
+      const ref = Math.abs(n.y) < 0.95 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
+      const u = new THREE.Vector3().crossVectors(ref, n).normalize();
+      const v = new THREE.Vector3().crossVectors(n, u).normalize();
+      const pts = [];
+      for (const t of tris) for (let k = 0; k < 3; k++) {
+        VP.fromBufferAttribute(pos, t * 3 + k);
+        pts.push({ i: t * 3 + k, x: VP.dot(u), y: VP.dot(v) });
+      }
+      let minX = 1e9, maxX = -1e9, minY = 1e9, maxY = -1e9;
+      for (const p of pts) { minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y); }
+      const span = Math.max(maxX - minX, maxY - minY), pad = 0.12;
+      const col = fi % cols, row = Math.floor(fi / cols);
+      const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+      let sx = 0, sy = 0;
+      for (const p of pts) {
+        const cu = ((p.x - cx) / span) * (1 - 2 * pad) + 0.5;
+        const cv = ((p.y - cy) / span) * (1 - 2 * pad) + 0.5;
+        uvs[p.i * 2] = (col + cu) / cols;
+        uvs[p.i * 2 + 1] = (row + cv) / rows;
+        sx += cu; sy += cv;
+      }
+      normals.push(n);
+      basisV.push(v);
+      numPos.push([sx / pts.length, sy / pts.length]);
+    });
+    geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+    geo.computeVertexNormals();
+    return { geo, normals, basisV, numPos, cols, rows, count: faceTris.length, fontScale };
+  }
+
+  const shapes = {};
+  function getShape(s) {
+    const key = [4, 6, 8, 10, 12, 20].includes(s) ? s : (s === 100 ? 10 : 20);
+    if (!shapes[key]) shapes[key] = buildShape(key);
+    return shapes[key];
+  }
+  let shape = getShape(20);
+  function defaults(sh) { return Array.from({ length: sh.count }, (_, i) => String(i + 1)); }
+  let faceVals = defaults(shape);
+  faceVals[0] = '?';
+
+  function drawAtlasTo(ctx, size, sh, vals) {
+    const { cols, rows, numPos, fontScale } = sh;
+    const cw = size / cols, ch = size / rows;
+    ctx.clearRect(0, 0, size, size);
+    for (let f = 0; f < sh.count; f++) {
+      const col = f % cols, row = Math.floor(f / cols);
+      const x0 = col * cw;
+      const y0 = size - (row + 1) * ch; /* texture flipY: v=0 is canvas bottom */
+      const g = ctx.createRadialGradient(x0 + cw / 2, y0 + ch / 2, 12, x0 + cw / 2, y0 + ch / 2, cw * 0.72);
+      g.addColorStop(0, '#ffffff');
+      g.addColorStop(1, '#cdd6e0');
+      ctx.fillStyle = g;
+      ctx.fillRect(x0, y0, cw, ch);
+      const v = vals[f];
+      const nx = x0 + numPos[f][0] * cw;
+      const ny = y0 + (1 - numPos[f][1]) * ch;
+      let fs = Math.min(cw, ch) * fontScale;
+      if (v.length === 2) fs *= 0.85; else if (v.length >= 3) fs *= 0.6;
+      ctx.font = `900 ${Math.floor(fs)}px Cinzel, Georgia, serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = 'rgba(8,14,22,.3)';
+      ctx.fillText(v, nx + 3, ny + 4);
+      ctx.fillStyle = '#10171f';
+      ctx.fillText(v, nx, ny);
+      if (v === '6' || v === '9') {
+        ctx.fillRect(nx - fs * 0.28, ny + fs * 0.62, fs * 0.56, fs * 0.07);
+      }
+    }
+  }
+  function drawAtlas() {
+    drawAtlasTo(actx, AT, shape, faceVals);
+    texture.needsUpdate = true;
+  }
+
+  const mat = new THREE.MeshStandardMaterial({
+    map: texture,
+    color: new THREE.Color(window.__dieColor || '#e09a3c'),
+    roughness: 0.62,
+    metalness: 0,
+  });
+  const die = new THREE.Mesh(shape.geo, mat);
+  die.castShadow = true;
+  scene.add(die);
+
+  function setShape(sides) {
+    const s = getShape(sides);
+    if (s !== shape) { shape = s; die.geometry = s.geo; }
+  }
+
+  const camDir = camera.position.clone().normalize();
+  const screenUp = new THREE.Vector3(0, 1, 0).addScaledVector(camDir, -camDir.y).normalize();
+  function alignFor(sh, face, jitter) {
+    const q = new THREE.Quaternion().setFromUnitVectors(sh.normals[face], camDir);
+    const w = sh.basisV[face].clone().applyQuaternion(q);
+    w.addScaledVector(camDir, -w.dot(camDir)).normalize();
+    let ang = Math.acos(Math.min(1, Math.max(-1, w.dot(screenUp))));
+    if (new THREE.Vector3().crossVectors(w, screenUp).dot(camDir) < 0) ang = -ang;
+    return new THREE.Quaternion().setFromAxisAngle(camDir, ang + (jitter || 0)).multiply(q);
+  }
+  function alignTo(face, jitter) { return alignFor(shape, face, jitter); }
+  die.quaternion.copy(alignTo(0, 0));
+
+  /* ── handfuls: several dice at once ── */
+  let multiDice = [];
+  function clearMulti() {
+    for (const m of multiDice) {
+      scene.remove(m.mesh);
+      m.mesh.material.map.dispose();
+      m.mesh.material.dispose();
+    }
+    multiDice = [];
+  }
+  function rollMulti(items, cb) {
+    clearMulti();
+    die.visible = false;
+    pendingCb = cb;
+    critT = 0;
+    const n = items.length;
+    const s = n === 2 ? 0.62 : n === 3 ? 0.48 : n <= 6 ? 0.42 : 0.34;
+    const cols = Math.min(n, 3);
+    const rows = Math.ceil(n / cols);
+    const now = performance.now();
+    items.forEach((it, i) => {
+      const sh = getShape(it.sides);
+      const c = document.createElement('canvas');
+      c.width = c.height = 512;
+      const vals = defaults(sh);
+      const tf = Math.floor(Math.random() * sh.count);
+      vals[tf] = String(it.value);
+      drawAtlasTo(c.getContext('2d'), 512, sh, vals);
+      const tex = new THREE.CanvasTexture(c);
+      tex.anisotropy = 8;
+      tex.colorSpace = THREE.SRGBColorSpace;
+      const m = new THREE.MeshStandardMaterial({ map: tex, color: mat.color.clone(), roughness: 0.62, metalness: 0 });
+      const mesh = new THREE.Mesh(sh.geo, m);
+      mesh.castShadow = true;
+      mesh.scale.setScalar(s);
+      const col = i % cols, row = Math.floor(i / cols);
+      const rowCols = Math.min(n - row * cols, cols);
+      mesh.position.set(
+        (col - (rowCols - 1) / 2) * 2.5 * s,
+        rows > 1 ? ((rows - 1) / 2 - row) * 2.45 * s : 0,
+        0);
+      scene.add(mesh);
+      multiDice.push({
+        mesh,
+        baseY: mesh.position.y,
+        axis: new THREE.Vector3(Math.random() * 2 - 1, Math.random() * 2 - 1, Math.random() * 2 - 1).normalize(),
+        qEnd: alignFor(sh, tf, (Math.random() - 0.5) * 0.3),
+        qStart: new THREE.Quaternion(),
+        endT: now + TUMBLE + i * 140,
+        settleT: 0,
+        done: false,
+      });
+    });
+    mode = 'multi';
+  }
+
+  let mode = 'rest', t0 = 0, pendingCb = null, critT = 0;
+  const axis = new THREE.Vector3(1, 0, 0);
+  const qStart = new THREE.Quaternion(), qEnd = new THREE.Quaternion();
+  const TUMBLE = 850, SETTLE = 480;
+  const upAxis = new THREE.Vector3(0, 1, 0);
+  const clock = new THREE.Clock();
+
+  function roll(value, crit, cb, sides) {
+    clearMulti();
+    die.visible = true;
+    setShape(sides || 20);
+    faceVals = defaults(shape);
+    const tf = Math.floor(Math.random() * shape.count);
+    faceVals[tf] = value;
+    drawAtlas();
+    mode = 'tumble';
+    t0 = performance.now();
+    axis.set(Math.random() * 2 - 1, Math.random() * 2 - 1, Math.random() * 2 - 1).normalize();
+    qEnd.copy(alignTo(tf, (Math.random() - 0.5) * 0.3));
+    pendingCb = cb;
+    critT = crit === 'crit' ? -1 : 0;
+  }
+
+  function showValue(value, sides) {
+    clearMulti();
+    die.visible = true;
+    setShape(sides || 20);
+    faceVals = defaults(shape);
+    faceVals[0] = value;
+    drawAtlas();
+    mode = 'rest';
+    pendingCb = null;
+    critT = 0;
+    mat.emissive.setRGB(0, 0, 0);
+    die.position.y = 0;
+    die.quaternion.copy(alignTo(0, 0));
+  }
+
+  function animate() {
+    requestAnimationFrame(animate);
+    const now = performance.now();
+    const dt = Math.min(clock.getDelta(), 0.05);
+    if (mode === 'multi') {
+      let allDone = true;
+      for (const m of multiDice) {
+        if (m.done) continue;
+        allDone = false;
+        if (!m.settleT) {
+          if (now >= m.endT) {
+            m.settleT = now;
+            m.qStart.copy(m.mesh.quaternion);
+          } else {
+            m.mesh.quaternion.premultiply(new THREE.Quaternion().setFromAxisAngle(m.axis, 14 * dt));
+            m.mesh.position.y = m.baseY + Math.abs(Math.sin(now * 0.012 + m.axis.x * 9)) * 0.14 * Math.max(0, (m.endT - now) / TUMBLE);
+          }
+        } else {
+          const k = (now - m.settleT) / SETTLE;
+          if (k >= 1) {
+            m.done = true;
+            m.mesh.quaternion.copy(m.qEnd);
+            m.mesh.position.y = m.baseY;
+          } else {
+            m.mesh.quaternion.slerpQuaternions(m.qStart, m.qEnd, 1 - Math.pow(1 - k, 3));
+            m.mesh.position.y = m.baseY - Math.sin(k * Math.PI) * 0.08;
+          }
+        }
+      }
+      if (allDone && multiDice.length) {
+        mode = 'rest';
+        if (pendingCb) { const cb = pendingCb; pendingCb = null; cb(); }
+      }
+    } else if (mode === 'tumble') {
+      const e = (now - t0) / TUMBLE;
+      if (e >= 1) {
+        mode = 'settle';
+        t0 = now;
+        qStart.copy(die.quaternion);
+      } else {
+        const speed = 16 * (1 - 0.55 * e);
+        die.quaternion.premultiply(new THREE.Quaternion().setFromAxisAngle(axis, speed * dt));
+        axis.applyAxisAngle(upAxis, dt * 1.6).normalize();
+        die.position.y = Math.abs(Math.sin(e * Math.PI * 3)) * 0.22 * (1 - e);
+      }
+    } else if (mode === 'settle') {
+      const e = (now - t0) / SETTLE;
+      if (e >= 1) {
+        mode = 'rest';
+        die.quaternion.copy(qEnd);
+        die.position.y = 0;
+        if (critT === -1) critT = now;
+        if (pendingCb) { const cb = pendingCb; pendingCb = null; cb(); }
+      } else {
+        const k = 1 - Math.pow(1 - e, 3);
+        die.quaternion.slerpQuaternions(qStart, qEnd, k);
+        die.position.y = -Math.sin(e * Math.PI) * 0.10;
+      }
+    } else {
+      if (die.visible) die.position.y = Math.sin(now * 0.0012) * 0.045;
+    }
+    if (critT > 0 && now - critT < 2600) {
+      const p = (Math.sin((now - critT) * 0.012) + 1) / 2;
+      mat.emissive.setRGB(p * 0.5, p * 0.36, p * 0.05);
+    } else if (critT > 0) {
+      critT = 0;
+      mat.emissive.setRGB(0, 0, 0);
+    }
+    renderer.render(scene, camera);
+  }
+
+  drawAtlas();
+  document.fonts.ready.then(drawAtlas);
+  if (window.__dieColor) mat.color.set(window.__dieColor);
+  window.DIE = { ready: true, roll, showValue, rollMulti, setColor: (hex) => mat.color.set(hex) };
+  animate();
+} catch (err) {
+  console.warn('3D die unavailable, falling back to text results:', err);
+}
+</script>
+</body>
+</html>
