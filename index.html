@@ -291,9 +291,21 @@
   }
   .npcbody { margin-top: 13px; }
   .foerow {
-    display: flex; align-items: center; gap: 8px; padding: 8px 10px; margin-bottom: 7px;
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; margin-bottom: 7px;
     background: linear-gradient(180deg, #fff, #e7eef6);
     border: 1px solid var(--frost-edge); border-left: 4px solid var(--blood); border-radius: 6px;
+  }
+  .foenote {
+    flex-basis: 100%; width: 100%; box-sizing: border-box; resize: vertical; min-height: 36px;
+    font-family: "IM Fell English", Georgia, serif; font-size: 13.5px; line-height: 1.4;
+    background: #fff; border: 1px solid #9cbeda; border-radius: 6px; color: var(--ink);
+    padding: 7px 10px; margin-top: 1px; box-shadow: inset 0 2px 4px rgba(125,165,200,.3);
+  }
+  .foenote::placeholder { color: #84a3bd; font-style: italic; }
+  .foenote-ro {
+    flex-basis: 100%; font-family: "IM Fell English", Georgia, serif; font-style: italic;
+    font-size: 13.5px; color: var(--ink-soft); margin-top: 1px; white-space: pre-wrap;
+    border-top: 1px dashed var(--frost-edge); padding-top: 6px;
   }
   .foerow .foename { font-family: "Cinzel", serif; font-weight: 700; font-size: 14.5px; color: var(--ink); }
   .foerow .foedice {
@@ -846,13 +858,20 @@ function renderNpcs() {
     if (npcs.length === 0) {
       html += `<div class="foehint">No foes stalk the snow… yet. Summon one below.</div>`;
     } else {
-      html += npcs.map(n => `<div class="foerow">
+      html += npcs.map(n => {
+        const note = n.note || "";
+        const noteHtml = IS_MASTER
+          ? `<textarea class="foenote" maxlength="500" placeholder="the Warden's notes on this foe… tactics, wounds, secrets" oninput="setNpcNote('${n.id}',this.value)">${escapeHtml(note)}</textarea>`
+          : (note ? `<div class="foenote-ro">${escapeHtml(note)}</div>` : "");
+        return `<div class="foerow">
           <span class="foename">${escapeHtml(n.name)}</span>
           <span class="foedice">${escapeHtml(n.dice)}</span>
           <span class="foespacer"></span>
           <button class="foecast" onclick="rollNpc('${n.id}')">⚔ ROLL</button>
           ${IS_MASTER ? `<button class="foebanish" title="banish this foe" onclick="removeNpc('${n.id}')">✕</button>` : ""}
-        </div>`).join("");
+          ${noteHtml}
+        </div>`;
+      }).join("");
     }
     if (IS_MASTER) {
       if (npcs.length >= MAX_NPCS) {
@@ -879,7 +898,7 @@ function addNpc() {
   const dice = (diceEl.value || "").trim().slice(0, 40);
   if (!name) { nameEl.focus(); return; }
   if (!dice || !parseDice(dice)) { diceEl.focus(); diceEl.select(); return; }
-  npcs.push({ id: "n" + Date.now().toString(36) + Math.floor(Math.random() * 1e4).toString(36), name, dice });
+  npcs.push({ id: "n" + Date.now().toString(36) + Math.floor(Math.random() * 1e4).toString(36), name, dice, note: "" });
   saveNpcs(); markDirty("npcs"); renderNpcs();
 }
 
@@ -887,6 +906,15 @@ function removeNpc(id) {
   if (!IS_MASTER) return;
   npcs = npcs.filter(n => n.id !== id);
   saveNpcs(); markDirty("npcs"); renderNpcs();
+}
+
+/* note edits commit on each keystroke but do NOT re-render — that would steal focus */
+function setNpcNote(id, val) {
+  if (!IS_MASTER) return;
+  const n = npcs.find(x => x.id === id);
+  if (!n) return;
+  n.note = String(val).slice(0, 500);
+  saveNpcs(); markDirty("npcs");
 }
 
 function rollNpc(id) {
