@@ -217,6 +217,22 @@
   .pip.rage { background: radial-gradient(circle at 35% 30%, #ffd9, transparent 45%), radial-gradient(circle, #e25822, #7e1d12); box-shadow: 0 0 11px rgba(226,88,34,.65); }
   .pip.rage.used { background: #a8bccc; box-shadow: inset 0 2px 4px rgba(20,50,80,.45); }
 
+  /* ── spell slots by tier (Veil reserves) ── */
+  .spelltracker { margin-bottom: 6px; }
+  .casternote { font-family: "IM Fell English", Georgia, serif; font-style: italic; font-size: 12.5px; color: var(--ink-soft); }
+  .slotrow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 7px 4px; }
+  .slvl {
+    font-family: "Cinzel", serif; font-weight: 700; font-size: 11.5px; letter-spacing: .5px;
+    color: #2c5578; min-width: 34px;
+  }
+  .slotpips { display: flex; gap: 7px; flex-wrap: wrap; }
+  .slotedit { display: flex; gap: 5px; margin-left: 4px; }
+  .slotedit .invbtn { padding: 2px 9px; font-size: 14px; }
+  .addtier {
+    font-family: "Cinzel", serif; font-weight: 700; font-size: 11.5px; letter-spacing: .5px;
+    padding: 5px 11px !important; color: var(--ink-soft) !important; border-style: dashed !important;
+  }
+
   .diecell { display: flex; flex-direction: column; gap: 3px; }
   .diecell .roll-btn { flex: 1; }
   .minicast {
@@ -508,7 +524,7 @@ const CHARS = {
     name: "Paco", emblem: "⚙", color: "#e09a3c",
     flavor: "Rock Gnome Artificer · bending the Veil with brass and care",
     line: "Artificer 2 · AC 14 (<b>15</b> w/ Enhanced Defense) · Speed 25 · Spell DC <b>13</b>",
-    hpMax: 17, slots: 2, init: 2,
+    hpMax: 17, init: 2, klass: "Artificer", level: 2, caster: "artificer",
     attacks: [
       { n: "Spark (Fire Bolt)", hit: 5, dmg: "1d10", type: "fire", cls: "spell" },
       { n: "Catapult · DEX 13", hit: null, dmg: "3d8", type: "bludgeoning", cls: "spell" },
@@ -524,7 +540,7 @@ const CHARS = {
     name: "Ray", emblem: "🏹", color: "#7fb069",
     flavor: "Wood Elf Ranger · silent as snowfall on the Shale Flats",
     line: "Ranger 2 · AC 15 · Speed 35 · Spell DC <b>12</b>",
-    hpMax: 20, slots: 2, init: 3,
+    hpMax: 20, init: 3, klass: "Ranger", level: 2, caster: "half",
     attacks: [
       { n: "Longbow", hit: 7, dmg: "1d8+3", type: "piercing", cls: "atk" },
       { n: "Longbow + Hunter's Mark", hit: 7, dmg: "1d8+3+1d6", type: "piercing", cls: "atk" },
@@ -540,7 +556,7 @@ const CHARS = {
     name: "Odinson", emblem: "🪓", color: "#8fb4dd",
     flavor: "Goliath Barbarian · the avalanche of the Thornback Reaches",
     line: "Barbarian 2 · AC 13 (<b>15</b> w/ shield) · Speed 30 · <b>cold resistance</b>",
-    hpMax: 23, slots: 0, rage: 2, init: 1,
+    hpMax: 23, rage: 2, init: 1, klass: "Barbarian", level: 2, caster: "none",
     attacks: [
       { n: "Greataxe", hit: 5, dmg: "1d12+3", type: "slashing", cls: "atk" },
       { n: "Greataxe (RAGING)", hit: 5, dmg: "1d12+5", type: "slashing", cls: "atk" },
@@ -562,11 +578,49 @@ let current = "paco";
 const IS_MASTER = new URLSearchParams(location.search).has("master");
 const MAX_NPCS = 5;
 const MAX_ITEMS = 30;
+const ENEMY_RED = "#a33636"; /* foes from the bestiary roll a blood-red die */
 const state = JSON.parse(localStorage.getItem("diceTableState") || "{}");
 for (const k in CHARS) {
-  if (!state[k]) state[k] = { hp: CHARS[k].hpMax, used: 0, rageUsed: 0 };
+  if (!state[k]) state[k] = { hp: CHARS[k].hpMax, rageUsed: 0 };
+  if (state[k].slotsUsed == null || typeof state[k].slotsUsed !== "object") {
+    state[k].slotsUsed = state[k].used ? { 1: state[k].used } : {}; /* migrate old single-level counter */
+  }
+  delete state[k].used;
 }
 function save() { localStorage.setItem("diceTableState", JSON.stringify(state)); }
+
+/* ── D&D 5e spell slots, derived from class & level ── */
+/* slots a FULL caster has, indexed by class level (1..20), each [1st,2nd,…] */
+const FULL_SLOTS = [
+  null,
+  [2], [3], [4, 2], [4, 3], [4, 3, 2], [4, 3, 3], [4, 3, 3, 1], [4, 3, 3, 2], [4, 3, 3, 3, 1], [4, 3, 3, 3, 2],
+  [4, 3, 3, 3, 2, 1], [4, 3, 3, 3, 2, 1], [4, 3, 3, 3, 2, 1, 1], [4, 3, 3, 3, 2, 1, 1], [4, 3, 3, 3, 2, 1, 1, 1],
+  [4, 3, 3, 3, 2, 1, 1, 1], [4, 3, 3, 3, 2, 1, 1, 1, 1], [4, 3, 3, 3, 3, 1, 1, 1, 1], [4, 3, 3, 3, 3, 2, 1, 1, 1], [4, 3, 3, 3, 3, 2, 2, 1, 1]
+];
+function casterLevel(c) {
+  const lv = c.level || 1;
+  switch (c.caster) {
+    case "full": return lv;                                  /* wizard, cleric, bard, druid, sorcerer */
+    case "half": return lv < 2 ? 0 : Math.ceil(lv / 2);      /* ranger, paladin — no slots at level 1 */
+    case "artificer": return Math.ceil(lv / 2);              /* artificer gains slots at level 1 */
+    case "third": return lv < 3 ? 0 : Math.ceil(lv / 3);     /* eldritch knight, arcane trickster */
+    default: return 0;                                       /* "none" — barbarian, fighter, etc. */
+  }
+}
+/* base max slots per spell level, as an object {1:n, 2:n, …} */
+function baseSlots(c) {
+  const eff = casterLevel(c);
+  const row = (eff >= 1 && FULL_SLOTS[eff]) ? FULL_SLOTS[eff] : [];
+  const o = {};
+  row.forEach((n, i) => { if (n > 0) o[i + 1] = n; });
+  return o;
+}
+/* the Warden may override the computed slots; that override is what the sheet then uses */
+function slotMaxFor(who) {
+  const ov = state[who] && state[who].slotMax;
+  return (ov && typeof ov === "object") ? ov : baseSlots(CHARS[who]);
+}
+function ord(n) { return n + ({ 1: "st", 2: "nd", 3: "rd" }[n] || "th"); }
 
 const logs = JSON.parse(localStorage.getItem("diceTableLogs") || "{}");
 for (const k in CHARS) {
@@ -593,7 +647,7 @@ function reroll() {
   if (a.a === "attack") attack(a.c, a.i);
   else if (a.a === "check") check(a.c, a.l, a.m);
   else if (a.a === "free") freeDie(a.n);
-  else doFormula(a.f, a.label);
+  else doFormula(a.f, a.label, a.a === "npc" ? ENEMY_RED : null);
 }
 
 function applyTheme() {
@@ -653,13 +707,13 @@ function diceItems(rolls) {
 }
 
 let settleTimer = null;
-function show(label, total, detail, extra, crit, sides, multi, bonus, dieValue) {
+function show(label, total, detail, extra, crit, sides, multi, bonus, dieValue, dieColor) {
   clearTimeout(settleTimer);
   const who = current;
   sides = sides || 20;
   const entry = { id: Date.now() + Math.random(), t: total, w: label, d: detail + (extra ? " · " + extra.replace(/<[^>]*>/g, "") : "") };
   lastRolls[who] = { label, total, detail, extra: extra || "", crit: crit || null, sides,
-    bonus: bonus || null, dieValue: dieValue != null ? dieValue : null };
+    bonus: bonus || null, dieValue: dieValue != null ? dieValue : null, dieColor: dieColor || null };
   saveLast();
   markDirty(who);
   const r = document.getElementById("result");
@@ -682,6 +736,7 @@ function show(label, total, detail, extra, crit, sides, multi, bonus, dieValue) 
     flyToJournal(total, who, entry);
   };
   if (window.DIE && window.DIE.ready) {
+    window.DIE.setColor(dieColor || window.__dieColor || CHARS[who].color); /* fighter strikes burn red; else the character's hue */
     if (multi && multi.length > 1) window.DIE.rollMulti(multi, () => reveal(extra || ""));
     else window.DIE.roll(String(dieValue != null ? dieValue : total), crit, () => reveal(extra || ""), sides);
   } else {
@@ -754,7 +809,10 @@ function displayLast() {
   bonusEl.className = "bonustag" + (lr.bonus ? " on" : "");
   document.getElementById("r-extra").innerHTML = lr.extra || (window.DIE && window.DIE.ready ? "" : `<b>${lr.total}</b>`);
   document.getElementById("r-detail").innerHTML = lr.detail;
-  if (window.DIE && window.DIE.ready) window.DIE.showValue(String(lr.dieValue != null ? lr.dieValue : lr.total), lr.sides || 20);
+  if (window.DIE && window.DIE.ready) {
+    window.DIE.setColor(lr.dieColor || window.__dieColor || CHARS[current].color);
+    window.DIE.showValue(String(lr.dieValue != null ? lr.dieValue : lr.total), lr.sides || 20);
+  }
   updateRerollBtn();
 }
 
@@ -815,13 +873,13 @@ function rollFormula() {
   doFormula(f);
 }
 
-function doFormula(f, label) {
+function doFormula(f, label, dieColor) {
   const r = parseDice(f);
   if (!r) { show("Formula", "?", "The runes resist reading: " + f, "", null, 20); return; }
   const items = diceItems(r.rolls);
   show(label || f, r.total, "[" + r.rolls.join(", ") + "]" + (r.flat ? " + " + r.flat : ""), "", null,
     items.length ? items[0].sides : 20, items.length > 1 ? items : null, fmtMod(r.flat) || null,
-    items.length === 1 ? items[0].value : null);
+    items.length === 1 ? items[0].value : null, dieColor || null);
 }
 
 /* ── dice pool ── */
@@ -942,7 +1000,7 @@ function rollNpc(id) {
   const n = npcs.find(x => x.id === id);
   if (!n) return;
   record({ a: "npc", f: n.dice, label: n.name });
-  doFormula(n.dice, n.name);
+  doFormula(n.dice, n.name, ENEMY_RED); /* foes roll red */
 }
 
 /* ── per-player backpack: shared, Warden-edited, everyone sees their own page ── */
@@ -1008,9 +1066,25 @@ function hpChange(charKey, delta) {
   s.hp = Math.max(0, Math.min(CHARS[charKey].hpMax, s.hp + delta));
   save(); markDirty(charKey); renderSheet();
 }
-function toggleSlot(charKey, idx) {
+/* spend / recover a slot of a given spell level — anyone may track expenditure */
+function toggleSlot(charKey, lvl, idx) {
   const s = state[charKey];
-  s.used = (idx < s.used) ? idx : idx + 1;
+  s.slotsUsed = s.slotsUsed || {};
+  const cur = s.slotsUsed[lvl] || 0;
+  s.slotsUsed[lvl] = (idx < cur) ? idx : idx + 1;
+  save(); markDirty(charKey); renderSheet();
+}
+/* the Warden adjusts how many slots of a level a character holds (stores an override) */
+function setSlotMax(charKey, lvl, delta) {
+  if (!IS_MASTER) return;
+  const base = slotMaxFor(charKey);
+  const o = {};
+  for (const k of Object.keys(base)) o[k] = base[k];
+  o[lvl] = Math.max(0, Math.min(9, (o[lvl] || 0) + delta));
+  if (!o[lvl]) delete o[lvl];
+  state[charKey].slotMax = o;
+  const used = state[charKey].slotsUsed || (state[charKey].slotsUsed = {});
+  if ((used[lvl] || 0) > (o[lvl] || 0)) used[lvl] = (o[lvl] || 0);
   save(); markDirty(charKey); renderSheet();
 }
 function toggleRage(charKey, idx) {
@@ -1030,10 +1104,27 @@ function renderSheet() {
     <button class="tbtn" onclick="hpChange('${current}',-5)">−5</button><button class="tbtn" onclick="hpChange('${current}',-1)">−1</button>
     <div class="hpwrap"><div class="hpfill ${hpClass}" style="width:${pct}%"></div><div class="hptext">${s.hp} / ${c.hpMax}</div></div>
     <button class="tbtn" onclick="hpChange('${current}',1)">+1</button><button class="tbtn" onclick="hpChange('${current}',5)">+5</button></div>`;
-  if (c.slots) {
-    html += `<div class="tracker"><label>VEIL RESERVES</label>`;
-    for (let i = 0; i < c.slots; i++) html += `<button class="pip ${i < s.used ? "used" : ""}" title="1st level slot" onclick="toggleSlot('${current}',${i})"></button>`;
-    html += `</div>`;
+  const maxes = slotMaxFor(current);
+  const used = s.slotsUsed || {};
+  const slotLevels = Object.keys(maxes).map(Number).filter(l => maxes[l] > 0).sort((a, b) => a - b);
+  const isCaster = c.caster && c.caster !== "none";
+  if (slotLevels.length || (IS_MASTER && isCaster)) {
+    html += `<div class="tracker spelltracker"><label>VEIL RESERVES</label>
+      <span class="casternote">${c.klass} ${c.level}</span></div>`;
+    for (const L of slotLevels) {
+      const u = used[L] || 0;
+      html += `<div class="slotrow"><span class="slvl">${ord(L)}</span><span class="slotpips">`;
+      for (let i = 0; i < maxes[L]; i++) {
+        html += `<button class="pip ${i < u ? "used" : ""}" title="${ord(L)}-level Veil slot" onclick="toggleSlot('${current}',${L},${i})"></button>`;
+      }
+      html += `</span>`;
+      if (IS_MASTER) html += `<span class="slotedit"><button class="invbtn" title="one fewer slot" onclick="setSlotMax('${current}',${L},-1)">−</button><button class="invbtn" title="one more slot" onclick="setSlotMax('${current}',${L},1)">+</button></span>`;
+      html += `</div>`;
+    }
+    if (IS_MASTER) {
+      const top = slotLevels.length ? Math.max(...slotLevels) : 0;
+      if (top < 9) html += `<div class="slotrow"><button class="invbtn addtier" onclick="setSlotMax('${current}',${top + 1},1)">✛ grant ${ord(top + 1)}-level slot</button></div>`;
+    }
   }
   if (c.rage) {
     html += `<div class="tracker"><label>RAGE</label>`;
