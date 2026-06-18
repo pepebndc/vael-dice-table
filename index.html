@@ -274,6 +274,48 @@
   }
   .freeform button:active { transform: translateY(2px); box-shadow: none; }
 
+  /* ── NPCs section (monsters / NPCs) ── */
+  #bestiary .panel { margin-bottom: 16px; }
+  .npctoggle {
+    cursor: pointer; user-select: none; margin: 0 !important;
+    display: flex; align-items: center; justify-content: center; gap: 9px;
+    transition: color .15s;
+  }
+  .npctoggle::before, .npctoggle::after { content: none !important; }
+  .npctoggle:hover { color: var(--blood); }
+  .npctoggle .chev { color: var(--blood); font-size: 11px; transition: transform .2s; }
+  .npcsec.open .npctoggle .chev { transform: none; }
+  .npccount {
+    font-family: "IM Fell English", Georgia, serif; font-style: normal; letter-spacing: 1px;
+    background: var(--blood); color: #fff; border-radius: 10px; padding: 1px 8px; font-size: 11px;
+  }
+  .npcbody { margin-top: 13px; }
+  .foerow {
+    display: flex; align-items: center; gap: 8px; padding: 8px 10px; margin-bottom: 7px;
+    background: linear-gradient(180deg, #fff, #e7eef6);
+    border: 1px solid var(--frost-edge); border-left: 4px solid var(--blood); border-radius: 6px;
+  }
+  .foerow .foename { font-family: "Cinzel", serif; font-weight: 700; font-size: 14.5px; color: var(--ink); }
+  .foerow .foedice {
+    font-family: "IM Fell English", Georgia, serif; font-style: italic; font-size: 13px;
+    color: var(--ink-soft); margin-left: 2px;
+  }
+  .foerow .foespacer { flex: 1; }
+  .foecast {
+    font-family: "Cinzel", serif; font-weight: 700; letter-spacing: .5px; font-size: 12.5px;
+    background: linear-gradient(180deg, #b34141, #7e2727); color: #fdeaea;
+    border: 1px solid #5e1c1c; border-radius: 6px; padding: 7px 13px; cursor: pointer;
+    box-shadow: 0 2px 0 #4a1616, 0 3px 6px rgba(40,8,8,.35); white-space: nowrap;
+  }
+  .foecast:active { transform: translateY(2px); box-shadow: none; }
+  .foebanish {
+    background: none; border: 1px solid var(--frost-edge); border-radius: 6px; color: var(--blood);
+    font-size: 14px; line-height: 1; padding: 6px 9px; cursor: pointer;
+  }
+  .foebanish:hover { background: var(--blood); color: #fff; border-color: var(--blood); }
+  .foehint { font-style: italic; color: var(--ink-soft); font-size: 13.5px; padding: 2px 0 8px; }
+  .summonrow input.foenum { flex: 0 0 96px; }
+
   /* ── Result: the die of fate ──────────── */
   #result {
     position: relative; text-align: center; padding: 20px 12px 18px; margin-bottom: 16px;
@@ -383,6 +425,7 @@
 <div class="layout">
   <div>
     <div class="tabs" id="tabs"></div>
+    <div id="bestiary"></div>
     <div class="advrow">
       <button class="mode on-norm" id="m-norm" onclick="setMode('norm')">❅ Normal</button>
       <button class="mode" id="m-adv" onclick="setMode('adv')">▲ Advantage</button>
@@ -482,6 +525,10 @@ const CHARS = {
 
 let mode = "norm";
 let current = "paco";
+
+/* ── the Warden's flag (?master): may summon & banish foes; reused for more later ── */
+const IS_MASTER = new URLSearchParams(location.search).has("master");
+const MAX_NPCS = 5;
 const state = JSON.parse(localStorage.getItem("diceTableState") || "{}");
 for (const k in CHARS) {
   if (!state[k]) state[k] = { hp: CHARS[k].hpMax, used: 0, rageUsed: 0 };
@@ -768,6 +815,87 @@ function castPool() {
   doFormula(spec, "Handful · " + spec);
 }
 
+/* ── the Warden's bestiary: shared NPCs / monsters (max 5), synced to all ── */
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+let npcs = (() => {
+  try { const a = JSON.parse(localStorage.getItem("diceTableNpcs") || "[]"); return Array.isArray(a) ? a.slice(0, MAX_NPCS) : []; }
+  catch { return []; }
+})();
+function saveNpcs() { localStorage.setItem("diceTableNpcs", JSON.stringify(npcs)); }
+
+let npcsOpen = localStorage.getItem("diceTableNpcsOpen") === "1";
+function toggleNpcs() {
+  npcsOpen = !npcsOpen;
+  localStorage.setItem("diceTableNpcsOpen", npcsOpen ? "1" : "0");
+  renderNpcs();
+}
+
+function renderNpcs() {
+  const el = document.getElementById("bestiary");
+  if (!el) return;
+  /* hidden to common folk until a foe walks the snow */
+  if (!IS_MASTER && npcs.length === 0) { el.innerHTML = ""; return; }
+  const chev = npcsOpen ? "▾" : "▸";
+  let html = `<div class="panel npcsec${npcsOpen ? " open" : ""}">`;
+  html += `<h2 class="npctoggle" onclick="toggleNpcs()" title="${npcsOpen ? "fold away" : "unfurl"} the roster of foes">`
+    + `<span class="chev">${chev}</span>NPCs${npcs.length ? ` <span class="npccount">${npcs.length}</span>` : ""}</h2>`;
+  if (npcsOpen) {
+    html += `<div class="npcbody">`;
+    if (npcs.length === 0) {
+      html += `<div class="foehint">No foes stalk the snow… yet. Summon one below.</div>`;
+    } else {
+      html += npcs.map(n => `<div class="foerow">
+          <span class="foename">${escapeHtml(n.name)}</span>
+          <span class="foedice">${escapeHtml(n.dice)}</span>
+          <span class="foespacer"></span>
+          <button class="foecast" onclick="rollNpc('${n.id}')">⚔ ROLL</button>
+          ${IS_MASTER ? `<button class="foebanish" title="banish this foe" onclick="removeNpc('${n.id}')">✕</button>` : ""}
+        </div>`).join("");
+    }
+    if (IS_MASTER) {
+      if (npcs.length >= MAX_NPCS) {
+        html += `<div class="foehint">The mountain suffers no more than ${MAX_NPCS} foes at once.</div>`;
+      } else {
+        html += `<div class="freeform summonrow">
+          <input id="npc-name" placeholder="name the foe… Frost Wraith" maxlength="40" onkeydown="if(event.key==='Enter')addNpc()">
+          <input id="npc-dice" class="foenum" placeholder="2d6+3" maxlength="40" onkeydown="if(event.key==='Enter')addNpc()">
+          <button onclick="addNpc()">SUMMON</button>
+        </div>`;
+      }
+    }
+    html += `</div>`;
+  }
+  html += `</div>`;
+  el.innerHTML = html;
+}
+
+function addNpc() {
+  if (!IS_MASTER || npcs.length >= MAX_NPCS) return;
+  const nameEl = document.getElementById("npc-name");
+  const diceEl = document.getElementById("npc-dice");
+  const name = (nameEl.value || "").trim().slice(0, 40);
+  const dice = (diceEl.value || "").trim().slice(0, 40);
+  if (!name) { nameEl.focus(); return; }
+  if (!dice || !parseDice(dice)) { diceEl.focus(); diceEl.select(); return; }
+  npcs.push({ id: "n" + Date.now().toString(36) + Math.floor(Math.random() * 1e4).toString(36), name, dice });
+  saveNpcs(); markDirty("npcs"); renderNpcs();
+}
+
+function removeNpc(id) {
+  if (!IS_MASTER) return;
+  npcs = npcs.filter(n => n.id !== id);
+  saveNpcs(); markDirty("npcs"); renderNpcs();
+}
+
+function rollNpc(id) {
+  const n = npcs.find(x => x.id === id);
+  if (!n) return;
+  record({ a: "npc", f: n.dice, label: n.name });
+  doFormula(n.dice, n.name);
+}
+
 function hpChange(charKey, delta) {
   const s = state[charKey];
   s.hp = Math.max(0, Math.min(CHARS[charKey].hpMax, s.hp + delta));
@@ -884,6 +1012,7 @@ function toggleSync() {
   renderSyncToggle();
   if (syncEnabled) {
     for (const k in CHARS) dirtyChars[k] = true; /* offer local snapshot to the table */
+    if (IS_MASTER) dirtyChars.npcs = true; /* only the Warden's foe-roster is authoritative */
     pushDirty();
     pullState();
   }
@@ -893,13 +1022,15 @@ async function pushDirty() {
   const whos = Object.keys(dirtyChars);
   dirtyChars = {};
   for (const who of whos) {
-    const bundle = {
-      state: state[who],
-      logs: logs[who],
-      lastRoll: lastRolls[who] || null,
-      lastAction: lastActions[who] || null,
-      updatedAt: syncMeta[who] || Date.now(),
-    };
+    const bundle = who === "npcs"
+      ? { npcs, updatedAt: syncMeta.npcs || Date.now() }
+      : {
+        state: state[who],
+        logs: logs[who],
+        lastRoll: lastRolls[who] || null,
+        lastAction: lastActions[who] || null,
+        updatedAt: syncMeta[who] || Date.now(),
+      };
     try {
       await fetch(`/api/state?table=${TABLE}`, {
         method: "PUT",
@@ -939,6 +1070,13 @@ async function pullState() {
         syncMeta[who] = rb.updatedAt;
         changed = true;
       }
+      const rn = remote.npcs;
+      if (rn && rn.updatedAt && (syncMeta.npcs || 0) < rn.updatedAt) {
+        npcs = Array.isArray(rn.npcs) ? rn.npcs.slice(0, MAX_NPCS) : [];
+        syncMeta.npcs = rn.updatedAt;
+        saveNpcs(); renderNpcs();
+        changed = true;
+      }
       if (changed) {
         save(); saveLogs(); saveLast();
         localStorage.setItem("diceTableActions", JSON.stringify(lastActions));
@@ -955,6 +1093,7 @@ renderTabs();
 renderSheet();
 renderLog();
 renderPool();
+renderNpcs();
 updateRerollBtn();
 window.addEventListener("load", () => { setTimeout(displayLast, 150); });
 renderSyncToggle();

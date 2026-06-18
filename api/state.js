@@ -1,6 +1,8 @@
 import { put, list } from "@vercel/blob";
 
+// Per-player bundles plus one shared "npcs" bundle the Warden (?master) edits.
 const CHARS = new Set(["paco", "ray", "odinson"]);
+const SHARED = new Set(["npcs"]);
 
 export default async function handler(req, res) {
   const table = String(req.query.table || "").replace(/[^a-zA-Z0-9-]/g, "").slice(0, 40);
@@ -24,7 +26,7 @@ export default async function handler(req, res) {
 
   if (req.method === "PUT") {
     const { who, bundle } = req.body || {};
-    if (!CHARS.has(who) || !bundle || typeof bundle !== "object") {
+    if ((!CHARS.has(who) && !SHARED.has(who)) || !bundle || typeof bundle !== "object") {
       return res.status(400).json({ error: "bad payload" });
     }
     if (JSON.stringify(bundle).length > 100000) {
