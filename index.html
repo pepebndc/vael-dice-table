@@ -364,6 +364,26 @@
     border-radius: 6px; padding: 4px 11px; cursor: pointer;
   }
   .invbtn:active { transform: translateY(1px); }
+  .invicon { font-size: 17px; width: 22px; text-align: center; flex: 0 0 auto; line-height: 1; }
+
+  /* ── item autosuggest dropdown ── */
+  .invadd { position: relative; }
+  .suggest {
+    position: absolute; left: 0; right: 0; top: 100%; margin-top: 4px; z-index: 40; display: none;
+    background: #fff; border: 1px solid var(--frost-edge); border-radius: 7px; overflow: hidden;
+    box-shadow: 0 8px 20px rgba(20,50,80,.30);
+  }
+  .suggest.on { display: block; }
+  .suggest .sugg {
+    display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+    background: #fff; border: 0; border-bottom: 1px solid #e3edf6; border-radius: 0; cursor: pointer;
+    padding: 8px 12px; margin: 0; box-shadow: none; transform: none;
+    font-family: "IM Fell English", Georgia, serif; font-weight: 400; font-size: 14.5px;
+    letter-spacing: normal; color: var(--ink);
+  }
+  .suggest .sugg:last-child { border-bottom: 0; }
+  .suggest .sugg:hover { background: var(--frost2); }
+  .suggicon { font-size: 17px; width: 22px; text-align: center; flex: 0 0 auto; }
 
   /* ── Result: the die of fate ──────────── */
   #result {
@@ -1012,6 +1032,88 @@ let inv = (() => {
 })();
 function saveInv() { localStorage.setItem("diceTableInv", JSON.stringify(inv)); }
 
+/* ── item catalog (open SRD 5e gear & magic items) for autosuggest + icons ── */
+const ITEM_CATALOG = [];
+const ICON_BY_NAME = {};
+(function buildCatalog() {
+  const groups = [
+    ["⚔️", ["Longsword", "Greatsword", "Shortsword", "Broadsword", "Scimitar", "Rapier"]],
+    ["🗡️", ["Dagger", "Shortsword (offhand)", "Sickle"]],
+    ["🪓", ["Handaxe", "Battleaxe", "Greataxe", "Halberd", "Glaive", "War Pick"]],
+    ["🔨", ["Warhammer", "Maul", "Light Hammer", "Mace", "Morningstar", "Flail", "Club", "Greatclub"]],
+    ["🔱", ["Spear", "Trident", "Pike", "Lance", "Javelin", "Quarterstaff"]],
+    ["🏹", ["Longbow", "Shortbow", "Light Crossbow", "Heavy Crossbow", "Hand Crossbow"]],
+    ["➴", ["Arrow", "Crossbow Bolt", "Sling Bullet", "Blowgun Needle"]],
+    ["🪃", ["Sling", "Net", "Dart", "Whip", "Blowgun"]],
+    ["🛡️", ["Shield", "Wooden Shield"]],
+    ["🥋", ["Padded Armor", "Leather Armor", "Studded Leather", "Hide Armor"]],
+    ["🦺", ["Chain Shirt", "Scale Mail", "Breastplate", "Half Plate", "Ring Mail"]],
+    ["🛡", ["Chain Mail", "Splint Armor", "Plate Armor"]],
+    ["🎒", ["Backpack", "Pouch", "Sack", "Quiver", "Component Pouch", "Bag of Holding"]],
+    ["🧴", ["Potion of Healing", "Potion of Greater Healing", "Antitoxin", "Alchemist's Fire", "Acid (vial)", "Oil (flask)", "Holy Water", "Perfume", "Poison (vial)"]],
+    ["🧪", ["Potion of Climbing", "Potion of Fire Breath", "Potion of Invisibility", "Elixir of Health"]],
+    ["📜", ["Scroll of Protection", "Spell Scroll", "Map", "Parchment", "Letter", "Paper", "Book"]],
+    ["📖", ["Spellbook", "Tome", "Ritual Book", "Book of Lore"]],
+    ["🔥", ["Torch", "Tinderbox", "Candle", "Lantern (Hooded)", "Bullseye Lantern", "Oil Flask"]],
+    ["🪢", ["Rope (50 ft)", "Hempen Rope", "Silk Rope", "Grappling Hook", "Chain (10 ft)", "Climber's Kit"]],
+    ["🔧", ["Tinker's Tools", "Smith's Tools", "Mason's Tools", "Carpenter's Tools", "Crowbar", "Hammer", "Piton"]],
+    ["🗝️", ["Thieves' Tools", "Lock", "Manacles", "Key"]],
+    ["🧰", ["Healer's Kit", "Herbalism Kit", "Poisoner's Kit", "Disguise Kit", "Forgery Kit", "Mess Kit"]],
+    ["🧭", ["Navigator's Tools", "Cartographer's Tools", "Spyglass", "Compass", "Hourglass"]],
+    ["🔮", ["Crystal Ball", "Orb", "Wand", "Wand of Magic Missiles", "Rod", "Staff", "Arcane Focus"]],
+    ["💍", ["Ring of Protection", "Ring", "Amulet", "Brooch", "Pendant"]],
+    ["🧥", ["Cloak of Protection", "Cloak of Elvenkind", "Robe", "Common Clothes", "Fine Clothes", "Traveler's Clothes"]],
+    ["👢", ["Boots of Elvenkind", "Boots of Striding", "Boots"]],
+    ["🪙", ["Gold Pieces", "Silver Pieces", "Copper Pieces", "Platinum Pieces"]],
+    ["💎", ["Gemstone", "Diamond", "Ruby", "Pearl", "Trinket"]],
+    ["🍞", ["Rations", "Bread", "Cheese", "Trail Mix", "Dried Meat"]],
+    ["🍺", ["Ale", "Wine", "Mug of Ale", "Bottle of Wine"]],
+    ["💧", ["Waterskin", "Flask", "Vial", "Jug"]],
+    ["🔔", ["Bell", "Signal Whistle", "Horn"]],
+    ["🪕", ["Lute", "Lyre", "Flute", "Drum", "Horn (instrument)", "Bagpipes"]],
+    ["🪞", ["Mirror (steel)", "Magnifying Glass", "Lens"]],
+    ["⛺", ["Tent", "Bedroll", "Blanket", "Hammock"]],
+    ["🪤", ["Hunting Trap", "Caltrops", "Ball Bearings", "Snare"]],
+    ["🕯️", ["Incense", "Holy Symbol", "Reliquary", "Censer"]],
+    ["🧂", ["Salt", "Soap", "Whetstone", "Chalk", "Ink", "Sealing Wax"]],
+  ];
+  for (const [icon, names] of groups) {
+    for (const n of names) { ITEM_CATALOG.push({ name: n, icon }); ICON_BY_NAME[n.toLowerCase()] = icon; }
+  }
+})();
+/* best icon for a typed name: exact match, else the longest catalog name it contains, else a generic pack */
+function iconFor(name) {
+  const k = (name || "").trim().toLowerCase();
+  if (ICON_BY_NAME[k]) return ICON_BY_NAME[k];
+  let best = "";
+  for (const it of ITEM_CATALOG) {
+    const n = it.name.toLowerCase();
+    if (k.startsWith(n) && n.length > best.length) best = n; /* "Longsword +1", "Potion of Healing (greater)" */
+  }
+  return best ? ICON_BY_NAME[best] : "📦";
+}
+
+let suggMatches = [];
+function suggestItems(q) {
+  const box = document.getElementById("item-suggest");
+  if (!box) return;
+  q = (q || "").trim().toLowerCase();
+  suggMatches = q ? ITEM_CATALOG.filter(it => it.name.toLowerCase().includes(q)).slice(0, 8) : [];
+  if (!suggMatches.length) { box.innerHTML = ""; box.classList.remove("on"); return; }
+  box.innerHTML = suggMatches.map((it, i) =>
+    `<button type="button" class="sugg" onmousedown="pickItem(event,${i})"><span class="suggicon">${it.icon}</span>${escapeHtml(it.name)}</button>`).join("");
+  box.classList.add("on");
+}
+function hideSuggest() { const b = document.getElementById("item-suggest"); if (b) { b.innerHTML = ""; b.classList.remove("on"); } }
+function pickItem(e, i) {
+  e.preventDefault(); /* fire before the input's blur so the choice registers */
+  const it = suggMatches[i];
+  if (!it) return;
+  const el = document.getElementById("item-name");
+  if (el) el.value = it.name;
+  addItem();
+}
+
 function renderInventory() {
   const el = document.getElementById("inventory");
   if (!el) return;
@@ -1022,6 +1124,7 @@ function renderInventory() {
   } else {
     html += list.map(it => `<div class="invrow">
         <span class="invqty">×${it.qty || 1}</span>
+        <span class="invicon">${it.icon || iconFor(it.name)}</span>
         <span class="invname">${escapeHtml(it.name)}</span>
         <span class="foespacer"></span>
         <button class="invbtn" title="one fewer" onclick="itemQty('${it.id}',-1)">−</button>
@@ -1032,9 +1135,11 @@ function renderInventory() {
   if (list.length >= MAX_ITEMS) {
     html += `<div class="foehint">The pack will bear no more than ${MAX_ITEMS} kinds of goods.</div>`;
   } else {
-    html += `<div class="freeform">
-      <input id="item-name" placeholder="stow an item… Healer's Kit, Torch, Rope (50 ft)" maxlength="60" onkeydown="if(event.key==='Enter')addItem()">
+    html += `<div class="freeform invadd">
+      <input id="item-name" placeholder="stow an item… Healer's Kit, Torch, Rope (50 ft)" maxlength="60" autocomplete="off"
+        oninput="suggestItems(this.value)" onblur="setTimeout(hideSuggest,200)" onkeydown="if(event.key==='Enter')addItem()">
       <button onclick="addItem()">STOW</button>
+      <div id="item-suggest" class="suggest"></div>
     </div>`;
   }
   html += `</div>`;
@@ -1047,8 +1152,8 @@ function addItem() {
   if (!name) { el.focus(); return; }
   const list = Array.isArray(inv[current]) ? inv[current] : (inv[current] = []);
   if (list.length >= MAX_ITEMS) return;
-  list.push({ id: "i" + Date.now().toString(36) + Math.floor(Math.random() * 1e4).toString(36), name, qty: 1 });
-  saveInv(); markDirty(current); renderInventory();
+  list.push({ id: "i" + Date.now().toString(36) + Math.floor(Math.random() * 1e4).toString(36), name, qty: 1, icon: iconFor(name) });
+  saveInv(); markDirty(current); hideSuggest(); renderInventory();
 }
 
 function itemQty(id, delta) {
