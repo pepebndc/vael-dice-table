@@ -1292,6 +1292,12 @@ const SYNC_ON = location.protocol.startsWith("http");
 const syncMeta = JSON.parse(localStorage.getItem("diceTableSyncMeta") || "{}");
 let dirtyChars = {};
 let pushTimer = null;
+const lastPushedSig = {}; /* skip writes whose content hasn't actually changed */
+
+/* fixed-cadence polling, paused while the tab is hidden. Reads no longer call
+   list() (see api/state.js), so a steady interval stays well under the cap. */
+let pollTimer = null;
+const POLL_MS = 6000;
 
 let syncEnabled = localStorage.getItem("diceTableSyncPref") !== "off";
 
@@ -1301,7 +1307,7 @@ function markDirty(who) {
   if (!SYNC_ON || !syncEnabled) return;
   dirtyChars[who] = true;
   clearTimeout(pushTimer);
-  pushTimer = setTimeout(pushDirty, 800);
+  pushTimer = setTimeout(pushDirty, 1200); /* coalesce rapid edits into one write */
 }
 
 function renderSyncToggle() {
@@ -1319,7 +1325,9 @@ function toggleSync() {
     for (const k in CHARS) dirtyChars[k] = true; /* offer local snapshot (incl. each pack) to the table */
     if (IS_MASTER) dirtyChars.npcs = true; /* only the Warden's foe-roster is authoritative */
     pushDirty();
-    pullState();
+    wakePolling();
+  } else {
+    clearTimeout(pollTimer); /* Veil severed — stop polling entirely */
   }
 }
 
@@ -1337,12 +1345,17 @@ async function pushDirty() {
         lastAction: lastActions[who] || null,
         updatedAt: syncMeta[who] || Date.now(),
       };
+    /* signature ignores updatedAt — if nothing meaningful changed, don't burn a write */
+    const { updatedAt, ...rest } = bundle;
+    const sig = JSON.stringify(rest);
+    if (lastPushedSig[who] === sig) continue;
     try {
       await fetch(`/api/state?table=${TABLE}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ who, bundle }),
       });
+      lastPushedSig[who] = sig;
     } catch (e) {
       dirtyChars[who] = true; /* retry on the next push */
     }
@@ -1359,13 +1372,14 @@ function mergeLogs(localL, remoteL) {
 
 let pulling = false;
 async function pullState() {
-  if (!syncEnabled || document.visibilityState !== "visible" || pulling) return;
+  if (!syncEnabled || document.visibilityState !== "visible" || pulling) return false;
   pulling = true;
+  let changed = false;
   try {
     const r = await fetch(`/api/state?table=${TABLE}`, { cache: "no-store" });
     if (r.ok) {
       const remote = await r.json();
-      let changed = false, invChanged = false;
+      let invChanged = false;
       for (const who in CHARS) {
         const rb = remote[who];
         if (!rb || !rb.updatedAt || (syncMeta[who] || 0) >= rb.updatedAt) continue;
@@ -1394,6 +1408,23 @@ async function pullState() {
     }
   } catch (e) { /* offline or local file: stay quiet */ }
   pulling = false;
+  return changed;
+}
+
+/* self-scheduling poll loop at a fixed cadence; stops while the tab is hidden */
+function scheduleNextPoll() {
+  clearTimeout(pollTimer);
+  pollTimer = setTimeout(pollTick, POLL_MS);
+}
+async function pollTick() {
+  clearTimeout(pollTimer);
+  if (!SYNC_ON || !syncEnabled || document.visibilityState !== "visible") return;
+  await pullState();
+  scheduleNextPoll();
+}
+function wakePolling() { /* resume on focus / tab-visible / re-attune */
+  if (!SYNC_ON || !syncEnabled) return;
+  pollTick();
 }
 
 applyTheme();
@@ -1407,8 +1438,12 @@ updateRerollBtn();
 window.addEventListener("load", () => { setTimeout(displayLast, 150); });
 renderSyncToggle();
 if (SYNC_ON) {
-  setInterval(pullState, 6000);
-  pullState();
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") wakePolling();
+    else clearTimeout(pollTimer);
+  });
+  window.addEventListener("focus", wakePolling);
+  pollTick();
   const foot = document.querySelector("footer");
   if (foot) foot.textContent += ` · expedition: ${TABLE}`;
 }
