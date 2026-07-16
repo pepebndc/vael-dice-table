@@ -476,8 +476,25 @@
   }
   #synctoggle:hover { transform: translateY(1px); }
 
-  /* ── The Bard's Veil (Spotify now-playing) ── */
-  #bardveil { position: relative; z-index: 3; margin: 0 0 16px; }
+  /* ── The Bard's Veil (Spotify now-playing): a chip in the tab row + popover ── */
+  #tabrow { display: flex; gap: 10px; align-items: flex-start; flex-wrap: wrap; margin-bottom: 14px; position: relative; z-index: 20; }
+  #tabrow .tabs { flex: 1; margin-bottom: 0; min-width: 0; }
+  #bardveil { position: relative; }
+  #bv-chip {
+    position: relative; display: flex; align-items: center; gap: 6px; max-width: 240px;
+    font-family: "Cinzel", serif; font-weight: 700; font-size: 12px; letter-spacing: 1px;
+    background: linear-gradient(180deg, rgba(24,44,68,.92), rgba(14,28,46,.92));
+    color: #8fb3d1; border: 1px solid #33567c; border-radius: 9px;
+    padding: 10px 14px 12px; cursor: pointer; overflow: hidden; transition: all .2s;
+  }
+  #bv-chip:hover { color: #eaf4fd; transform: translateY(1px); }
+  #bv-chip.playing { color: #ffd97a; border-color: #c89a3c; box-shadow: 0 0 12px rgba(224,154,60,.35); }
+  #bv-chipname { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #bv-chipfill { position: absolute; left: 0; bottom: 0; height: 3px; width: 0; background: var(--accent); transition: width 1s linear; }
+  #bv-pop {
+    position: absolute; top: calc(100% + 8px); right: 0; width: min(560px, 92vw); z-index: 30;
+    filter: drop-shadow(0 10px 24px rgba(3,10,20,.55));
+  }
   #bardveil .music {
     display: flex; align-items: center; gap: 12px;
     background: linear-gradient(160deg, var(--frost) 0%, var(--frost2) 100%);
@@ -532,11 +549,12 @@
   <div class="rule"></div>
 </header>
 
-<div id="bardveil"></div>
-
 <div class="layout">
   <div>
-    <div class="tabs" id="tabs"></div>
+    <div id="tabrow">
+      <div class="tabs" id="tabs"></div>
+      <div id="bardveil"></div>
+    </div>
     <div id="bestiary"></div>
     <div class="advrow">
       <button class="mode on-norm" id="m-norm" onclick="setMode('norm')">❅ Normal</button>
@@ -1742,7 +1760,10 @@ function spotEmbedStalled() {
 }
 function spotUpdateTuck() {
   const wrap = document.getElementById("bv-embedwrap");
-  if (wrap) wrap.classList.toggle("tucked", !spotEmbedStalled());
+  if (!wrap) return;
+  const stalled = spotEmbedStalled();
+  wrap.classList.toggle("tucked", !stalled);
+  if (stalled && !bvOpen) { bvOpen = true; renderMusic(); } /* surface Spotify's own play button */
 }
 
 /* ── the bar itself ── */
@@ -1750,24 +1771,35 @@ function fmtMs(ms) {
   const s = Math.max(0, Math.round(ms / 1000));
   return Math.floor(s / 60) + ":" + ("0" + (s % 60)).slice(-2);
 }
+let bvOpen = false;
+function toggleBardVeil() { bvOpen = !bvOpen; renderMusic(); }
 function renderMusic() {
   const el = document.getElementById("bardveil");
   if (!el) return;
   if (!SYNC_ON) { el.innerHTML = ""; return; }
-  /* skeleton once: the strip re-renders freely, the embed's iframe must survive it */
-  if (!document.getElementById("bv-music")) {
-    el.innerHTML = `<div id="bv-music"></div><div id="bv-embedwrap" class="tucked" hidden><div id="bv-embed"></div></div>`;
+  /* skeleton once: chip + popover; re-renders touch only bv-music, so the
+     embed's iframe (the audio itself) survives every repaint */
+  if (!document.getElementById("bv-chip")) {
+    el.innerHTML = `<button id="bv-chip" onclick="toggleBardVeil()" title="The Bard's Veil — the table's music"><span id="bv-chipname"></span><i id="bv-chipfill"></i></button>
+      <div id="bv-pop" hidden><div id="bv-music"></div><div id="bv-embedwrap" class="tucked" hidden><div id="bv-embed"></div></div></div>`;
   }
+  const chip = document.getElementById("bv-chip");
+  const chipName = document.getElementById("bv-chipname");
+  const pop = document.getElementById("bv-pop");
   const strip = document.getElementById("bv-music");
   const wrap = document.getElementById("bv-embedwrap");
   const s = spotifyShared;
   wrap.hidden = IS_MASTER || !spotFollowing;
+  pop.hidden = !bvOpen;
 
-  /* the Warden, not yet bound: the one-time binding ritual */
+  /* the Warden, not yet bound: the one-time binding ritual lives in the popover */
   if (IS_MASTER && (!spot.refresh || spot.role !== "master")) {
-    const sig = "bind";
+    const sig = "bind|" + bvOpen;
+    el.style.display = "";
     if (el.dataset.sig !== sig) {
       el.dataset.sig = sig;
+      chipName.textContent = "♪ BIND THE VEIL";
+      chip.classList.remove("playing");
       strip.innerHTML = `<div class="music">
         <div class="art silent">♪</div>
         <div class="tinfo">
@@ -1782,8 +1814,9 @@ function renderMusic() {
     return;
   }
 
-  /* nothing broadcast yet and nothing to offer: keep the strip out of the way */
-  if (!s && !IS_MASTER) { el.dataset.sig = ""; strip.innerHTML = ""; wrap.hidden = true; return; }
+  /* nothing broadcast yet and nothing to offer: no chip at all */
+  if (!s && !IS_MASTER) { el.dataset.sig = ""; el.style.display = "none"; return; }
+  el.style.display = "";
 
   const silent = !s || s.silent || !s.track;
   const t = !silent ? s.track : null;
@@ -1800,9 +1833,11 @@ function renderMusic() {
   } else {
     right = `<button class="mbtn" onclick="spotBeginListening()" title="follow the Warden's music on this device — full songs if this browser is signed into spotify.com, else 30s echoes">♪ HEAR IT HERE</button>`;
   }
-  const sig = JSON.stringify([silent, t && t.uri, s && s.playing, right]);
+  const sig = JSON.stringify([silent, t && t.uri, s && s.playing, right, bvOpen]);
   if (el.dataset.sig !== sig) {
     el.dataset.sig = sig;
+    chipName.textContent = silent ? "♪ the hall is silent" : "♪ " + t.name;
+    chip.classList.toggle("playing", !silent && !!s.playing);
     strip.innerHTML = `<div class="music">
       ${t && t.art ? `<img class="art" src="${escapeHtml(t.art)}" alt="">` : `<div class="art silent">♪</div>`}
       <div class="tinfo">
@@ -1822,8 +1857,11 @@ function spotTickUi() { /* cheap 1s tick: only the progress bar, clock, and embe
   const s = spotifyShared;
   if (!s || !s.track) return;
   const fill = document.getElementById("bv-fill"), time = document.getElementById("bv-time");
+  const chipfill = document.getElementById("bv-chipfill");
   const pos = spotExpectedPos(), dur = s.track.durationMs || 1;
-  if (fill) fill.style.width = Math.min(100, (pos / dur) * 100) + "%";
+  const pct = Math.min(100, (pos / dur) * 100) + "%";
+  if (fill) fill.style.width = pct;
+  if (chipfill) chipfill.style.width = pct;
   if (time) time.textContent = fmtMs(pos) + " / " + fmtMs(dur);
 }
 
