@@ -20,7 +20,7 @@ Open `index.html` in a browser, or serve the folder statically. Fonts and Three.
 
 ## Deploy
 
-Static site. Works as-is on Vercel, Netlify, or GitHub Pages. Cross-device sync (`/api/state`) and the Bard's Veil need Vercel with a Blob store attached.
+Static site. Works as-is on Vercel, Netlify, or GitHub Pages. Cross-device sync (`/api/state`) and the Bard's Veil need Vercel with the free **Upstash Redis** integration connected (Vercel dashboard → Storage/Marketplace → Upstash → create a free Redis database → connect to this project → redeploy). Each poll is one MGET and each save one SET, so the 500k-commands/month free tier is roughly 10× a weekly campaign's usage.
 
 ## The Bard's Veil (Spotify sync) — one-time setup
 
