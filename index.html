@@ -1432,6 +1432,7 @@ function mergeLogs(localL, remoteL) {
 }
 
 let pulling = false;
+let seededPush = false; /* one-shot: offer local snapshots to an empty store */
 async function pullState() {
   if (!syncEnabled || document.visibilityState !== "visible" || pulling) return false;
   pulling = true;
@@ -1474,6 +1475,18 @@ async function pullState() {
         localStorage.setItem("diceTableSyncMeta", JSON.stringify(syncMeta));
         renderSheet(); renderLog(); updateRerollBtn();
         if (invChanged) renderInventory();
+      }
+      /* seeding: once per session, offer this device's snapshot for anything the
+         server doesn't hold — so a fresh (or freshly swapped) store repopulates
+         from the tables' own devices without waiting for someone to edit */
+      if (!seededPush) {
+        seededPush = true;
+        let seeding = false;
+        for (const who in CHARS) {
+          if (!remote[who]) { dirtyChars[who] = true; seeding = true; }
+        }
+        if (IS_MASTER && !remote.npcs && npcs.length) { dirtyChars.npcs = true; seeding = true; }
+        if (seeding) { clearTimeout(pushTimer); pushTimer = setTimeout(pushDirty, 1200); }
       }
     }
   } catch (e) { /* offline or local file: stay quiet */ }
