@@ -475,6 +475,47 @@
     border: 1px dashed #4a5160;
   }
   #synctoggle:hover { transform: translateY(1px); }
+
+  /* ── The Bard's Veil (Spotify now-playing) ── */
+  #bardveil { position: relative; z-index: 3; margin: 0 0 16px; }
+  #bardveil .music {
+    display: flex; align-items: center; gap: 12px;
+    background: linear-gradient(160deg, var(--frost) 0%, var(--frost2) 100%);
+    border: 1px solid var(--frost-edge); border-radius: 10px;
+    padding: 10px 14px; color: var(--ink);
+    box-shadow: 0 6px 18px rgba(4, 12, 24, .35);
+  }
+  #bardveil .art {
+    width: 46px; height: 46px; border-radius: 6px; flex: none;
+    border: 1px solid var(--frost-edge); object-fit: cover; background: #bdd5ea;
+  }
+  #bardveil .art.silent { display: flex; align-items: center; justify-content: center; font-size: 22px; color: var(--ink-soft); }
+  #bardveil .tinfo { flex: 1; min-width: 0; }
+  #bardveil .tname { font-family: "Cinzel", serif; font-weight: 700; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #bardveil .tartist { font-size: 12.5px; font-style: italic; color: var(--ink-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #bardveil .bar { height: 4px; background: rgba(30, 50, 71, .15); border-radius: 2px; margin-top: 6px; overflow: hidden; }
+  #bardveil .bar i { display: block; height: 100%; width: 0; background: var(--accent); border-radius: 2px; transition: width 1s linear; }
+  #bardveil .ttime { font-size: 11px; color: var(--ink-soft); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  #bardveil .mbtn {
+    font-family: "Cinzel", serif; font-weight: 700; font-size: 11.5px; letter-spacing: 1px; white-space: nowrap;
+    background: linear-gradient(180deg, #3a2c12, #221806); color: #ffd97a;
+    border: 1px solid #c89a3c; border-radius: 14px; padding: 6px 12px; cursor: pointer;
+  }
+  #bardveil .mbtn.quiet { background: none; color: var(--ink-soft); border: 1px dashed var(--frost-edge); }
+  #bardveil a.mbtn { text-decoration: none; display: inline-block; }
+  #bardveil .mbtn:hover { transform: translateY(1px); }
+  #bardveil input {
+    font-family: "IM Fell English", serif; font-size: 13px; color: var(--ink);
+    background: rgba(255, 255, 255, .55); border: 1px solid var(--frost-edge); border-radius: 6px;
+    padding: 6px 10px; flex: 1; min-width: 0;
+  }
+  #bardveil .mnote { font-size: 12px; font-style: italic; color: var(--ink-soft); }
+  #bv-embedwrap { margin-top: 8px; border-radius: 12px; overflow: hidden; }
+  #bv-embedwrap iframe { display: block; }
+  /* the embed stays mounted (it IS the audio) but out of sight; it surfaces only
+     when the browser refuses to play without a tap on Spotify's own button */
+  #bv-embedwrap.tucked { height: 0; margin-top: 0; opacity: 0; pointer-events: none; }
+  #bardveil code { font-size: 11px; background: rgba(30, 50, 71, .1); padding: 1px 5px; border-radius: 4px; }
 </style>
 </head>
 <body>
@@ -490,6 +531,8 @@
   <div class="sub">Millhaven Guild Lodge · let the dice fall where the snow drifts</div>
   <div class="rule"></div>
 </header>
+
+<div id="bardveil"></div>
 
 <div class="layout">
   <div>
@@ -598,6 +641,19 @@ const CHARS = {
 
 let mode = "norm";
 let current = "paco";
+
+/* ── returning from Spotify's gate: the OAuth redirect swaps our query string for
+   ?code=…&state=…, where state carries the original ?master&table. Put the real
+   query back BEFORE anyone reads location.search, and keep the code for later. ── */
+let SPOT_CODE = null;
+{
+  const q = new URLSearchParams(location.search);
+  if (q.get("code") && q.has("state")) {
+    SPOT_CODE = q.get("code");
+    const restored = q.get("state") || "";
+    history.replaceState(null, "", location.pathname + (restored ? "?" + restored : ""));
+  }
+}
 
 /* ── the Warden's flag (?master): may summon & banish foes; reused for more later ── */
 const IS_MASTER = new URLSearchParams(location.search).has("master");
@@ -1338,7 +1394,9 @@ async function pushDirty() {
   const whos = Object.keys(dirtyChars);
   dirtyChars = {};
   for (const who of whos) {
-    const bundle = who === "npcs"
+    const bundle = who === "spotify"
+      ? { ...(spotifyShared || {}), updatedAt: syncMeta.spotify || Date.now() }
+      : who === "npcs"
       ? { npcs, updatedAt: syncMeta.npcs || Date.now() }
       : {
         state: state[who],
@@ -1401,6 +1459,15 @@ async function pullState() {
         saveNpcs(); renderNpcs();
         changed = true;
       }
+      /* the Bard's Veil: only the Warden authors it, so the Warden never applies it.
+         Deliberately not part of `changed` — a music heartbeat shouldn't re-render sheets. */
+      const rs = remote.spotify;
+      if (!IS_MASTER && rs && rs.updatedAt && (syncMeta.spotify || 0) < rs.updatedAt) {
+        spotifyShared = rs;
+        syncMeta.spotify = rs.updatedAt;
+        localStorage.setItem("diceTableSyncMeta", JSON.stringify(syncMeta));
+        renderMusic(); followMusic();
+      }
       if (changed) {
         save(); saveLogs(); saveLast(); saveInv();
         localStorage.setItem("diceTableActions", JSON.stringify(lastActions));
@@ -1429,6 +1496,337 @@ function wakePolling() { /* resume on focus / tab-visible / re-attune */
   if (!SYNC_ON || !syncEnabled) return;
   pollTick();
 }
+
+/* ── The Bard's Veil: Spotify, synced from the Warden's own client ──────────────
+   The Warden binds their Spotify account once (OAuth PKCE — all client-side, no
+   secret). This tab then polls what their NATIVE Spotify client is playing and
+   broadcasts it through the same blob channel as everything else ("spotify"
+   bundle: track, position, play state). Every player sees the now-playing bar;
+   to HEAR it, players use Spotify's public iframe embed, steered to the Warden's
+   track and position — no player sign-in, no app allowlist, no Premium needed
+   (browsers signed into spotify.com get full tracks; others get 30s previews). */
+const SPOT_LS = "diceTableSpotify";
+let spot = JSON.parse(localStorage.getItem(SPOT_LS) || "{}"); /* {clientId, role, verifier, access, refresh, expiresAt} — the Warden only */
+let spotifyShared = null;                 /* the Warden's broadcast, as last seen */
+let spotEmbed = null, spotEmbedUri = null, spotEmbedState = null; /* the listeners' iframe controller */
+let spotPreview = false; /* embed is serving 30s echoes → this browser isn't signed into spotify.com */
+let spotLastCmd = 0;     /* when we last told the embed to play — grace period before declaring it stuck */
+let spotFollowing = localStorage.getItem("diceTableSpotifyFollow") === "on";
+const SPOT_REDIRECT = location.origin + location.pathname;
+
+function saveSpot() { localStorage.setItem(SPOT_LS, JSON.stringify(spot)); }
+
+/* ── PKCE plumbing ── */
+function spotRandom(n) {
+  return Array.from(crypto.getRandomValues(new Uint8Array(n)), b => ("0" + b.toString(16)).slice(-2)).join("");
+}
+async function spotChallenge(v) {
+  const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(v));
+  return btoa(String.fromCharCode(...new Uint8Array(d))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+async function spotAuthorize() { /* the Warden only — they own the app, so no allowlist entries are ever needed */
+  const clientId = (spot.clientId || "").trim();
+  if (!clientId) return;
+  spot.clientId = clientId; spot.verifier = spotRandom(48); spot.role = "master";
+  delete spot.access; delete spot.refresh; delete spot.expiresAt;
+  saveSpot();
+  const p = new URLSearchParams({
+    response_type: "code", client_id: clientId,
+    scope: "user-read-playback-state user-read-currently-playing",
+    redirect_uri: SPOT_REDIRECT,
+    code_challenge_method: "S256",
+    code_challenge: await spotChallenge(spot.verifier),
+    state: location.search.slice(1), /* so ?master&table survive the round-trip */
+  });
+  location.href = "https://accounts.spotify.com/authorize?" + p;
+}
+async function spotToken(body) {
+  const r = await fetch("https://accounts.spotify.com/api/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ client_id: spot.clientId, ...body }),
+  });
+  if (!r.ok) throw new Error("token " + r.status);
+  const t = await r.json();
+  spot.access = t.access_token;
+  if (t.refresh_token) spot.refresh = t.refresh_token;
+  spot.expiresAt = Date.now() + Math.max(0, (t.expires_in || 3600) - 60) * 1000;
+  saveSpot();
+}
+async function spotAccess() {
+  if (!spot.access) return null;
+  if (Date.now() >= (spot.expiresAt || 0)) {
+    if (!spot.refresh) return null;
+    try { await spotToken({ grant_type: "refresh_token", refresh_token: spot.refresh }); }
+    catch { return null; }
+  }
+  return spot.access;
+}
+function spotUnbind() {
+  const keepId = spot.clientId;
+  if (IS_MASTER && spotifyShared) { /* tell the table the music has stopped */
+    spotifyShared = { clientId: keepId, silent: true, playing: false, fetchedAt: Date.now() };
+    markDirty("spotify");
+  }
+  clearTimeout(spotMasterTimer);
+  spot = { clientId: keepId };
+  saveSpot();
+  renderMusic();
+}
+
+/* ── the Warden's side: poll the native client, broadcast on change ── */
+let spotMasterTimer = null, spotLastPush = 0;
+async function spotMasterTick() {
+  clearTimeout(spotMasterTimer);
+  if (!IS_MASTER || !spot.refresh || spot.role !== "master") return;
+  const tok = await spotAccess();
+  if (!tok) { /* refresh failed (offline?) — keep trying, the binding may recover */
+    renderMusic();
+    spotMasterTimer = setTimeout(spotMasterTick, 15000);
+    return;
+  }
+  try {
+    const r = await fetch("https://api.spotify.com/v1/me/player/currently-playing", {
+      headers: { Authorization: "Bearer " + tok },
+    });
+    if (r.status === 401) spot.expiresAt = 0; /* stale token — refresh on next tick */
+    let now = null;
+    if (r.status === 200) {
+      const j = await r.json();
+      if (j && j.item) now = {
+        clientId: spot.clientId,
+        playing: !!j.is_playing,
+        progressMs: j.progress_ms || 0,
+        fetchedAt: Date.now(),
+        track: {
+          uri: j.item.uri,
+          ctx: (j.context && j.context.uri) || null, /* playlist/album, so followers auto-advance */
+          name: j.item.name,
+          artists: (j.item.artists || []).map(a => a.name).join(", "),
+          art: (j.item.album && j.item.album.images && j.item.album.images.length)
+            ? j.item.album.images[j.item.album.images.length - 1].url : "",
+          durationMs: j.item.duration_ms || 0,
+        },
+      };
+    } else if (r.status === 204) { /* nothing playing anywhere */
+      now = { clientId: spot.clientId, silent: true, playing: false, fetchedAt: Date.now() };
+    }
+    if (now) {
+      const prev = spotifyShared;
+      const expected = prev && prev.track
+        ? prev.progressMs + (prev.playing ? now.fetchedAt - prev.fetchedAt : 0)
+        : 0;
+      const turned = !prev
+        || (prev.track && prev.track.uri) !== (now.track && now.track.uri)
+        || !!prev.playing !== !!now.playing
+        || !!prev.silent !== !!now.silent;
+      const seeked = !turned && now.track && Math.abs((now.progressMs || 0) - expected) > 4000;
+      spotifyShared = now;
+      renderMusic();
+      /* write on real change, else a 30s heartbeat to re-anchor progress — keeps blob writes low */
+      if (turned || seeked || Date.now() - spotLastPush > 30000) {
+        spotLastPush = Date.now();
+        markDirty("spotify");
+      }
+    }
+  } catch { /* offline; try again next tick */ }
+  spotMasterTimer = setTimeout(spotMasterTick, 5000);
+}
+
+/* ── the players' side: Spotify's public iframe embed, steered to follow the
+   Warden. No OAuth, no allowlist, no Premium — the embed is open to everyone.
+   Browsers signed into spotify.com hear full tracks; the rest, 30s previews. ── */
+function spotEnsureEmbed() {
+  if (IS_MASTER || spotEmbed) return;
+  const host = document.getElementById("bv-embed");
+  if (!host) return;
+  const boot = (api) => {
+    const uri = (spotifyShared && spotifyShared.track && spotifyShared.track.uri) || "";
+    api.createController(host, { uri, width: "100%", height: 80 }, (ctrl) => {
+      spotEmbed = ctrl;
+      spotEmbedUri = uri;
+      ctrl.addListener("playback_update", (e) => {
+        spotEmbedState = { ...e.data, at: Date.now() }; /* position/duration in ms, isPaused */
+        /* signed-out browsers get 30s echoes: the embed reports ~30s where the
+           Warden's broadcast says the ballad runs longer. Nudge them to sign in. */
+        const real = spotifyShared && spotifyShared.track && spotifyShared.track.uri === spotEmbedUri
+          ? spotifyShared.track.durationMs : 0;
+        const preview = !!(e.data.duration && e.data.duration <= 32000 && real > 40000);
+        if (preview !== spotPreview) { spotPreview = preview; renderMusic(); }
+      });
+      followMusic(true);
+      renderMusic();
+    });
+  };
+  if (window.__spotEmbedApi) { boot(window.__spotEmbedApi); return; }
+  if (!document.getElementById("spotembedapi")) {
+    window.onSpotifyIframeApiReady = (api) => { window.__spotEmbedApi = api; boot(api); };
+    const s = document.createElement("script");
+    s.id = "spotembedapi"; s.src = "https://open.spotify.com/embed/iframe-api/v1";
+    document.head.appendChild(s);
+  }
+}
+function spotBeginListening() { /* a user gesture, so the embed may make sound */
+  spotFollowing = true;
+  localStorage.setItem("diceTableSpotifyFollow", "on");
+  renderMusic();      /* reveals the embed host… */
+  spotEnsureEmbed();  /* …then mounts the controller into it */
+  if (spotEmbed) followMusic(true);
+}
+function spotStopListening() {
+  spotFollowing = false;
+  localStorage.setItem("diceTableSpotifyFollow", "off");
+  if (spotEmbed) { try { spotEmbed.pause(); } catch {} }
+  renderMusic();
+}
+function spotRemountEmbed() { /* after signing into spotify.com, a fresh iframe picks up the session */
+  if (spotEmbed) { try { spotEmbed.destroy(); } catch {} }
+  spotEmbed = null; spotEmbedUri = null; spotEmbedState = null; spotPreview = false;
+  const wrap = document.getElementById("bv-embedwrap");
+  if (wrap) wrap.innerHTML = `<div id="bv-embed"></div>`;
+  renderMusic();
+  spotEnsureEmbed();
+}
+function spotExpectedPos() {
+  const s = spotifyShared;
+  if (!s || !s.track) return 0;
+  const pos = s.progressMs + (s.playing ? Date.now() - s.fetchedAt : 0);
+  return Math.max(0, Math.min(s.track.durationMs || pos, pos));
+}
+function followMusic(force) {
+  if (IS_MASTER || !spotFollowing || !spotEmbed) return;
+  const s = spotifyShared;
+  if (!s) return;
+  try {
+    const pos = spotExpectedPos();
+    if (!s.track || s.silent || !s.playing) {
+      if (spotEmbedState && !spotEmbedState.isPaused) spotEmbed.pause();
+    } else if (spotPreview && spotEmbedState && s.track.uri === spotEmbedUri && pos > (spotEmbedState.duration || 0)) {
+      /* signed-out preview already spent — don't loop the 30s echo; the bar shows the sign-in nudge */
+      if (!spotEmbedState.isPaused) spotEmbed.pause();
+    } else if (s.track.uri !== spotEmbedUri || force) {
+      spotEmbedUri = s.track.uri;
+      spotLastCmd = Date.now();
+      spotEmbed.loadUri(s.track.uri);
+      spotEmbed.play();
+      spotEmbed.seek(Math.round(pos / 1000));
+    } else if (spotEmbedState) {
+      const est = spotEmbedState.position + (spotEmbedState.isPaused ? 0 : Date.now() - spotEmbedState.at);
+      if (spotEmbedState.isPaused) { spotLastCmd = Date.now(); spotEmbed.play(); spotEmbed.seek(Math.round(pos / 1000)); }
+      else if (Math.abs(est - pos) > 4000) spotEmbed.seek(Math.round(pos / 1000)); /* drifted — step back in line */
+    }
+  } catch { /* the Veil flickers; next pull retries */ }
+}
+/* stalled = the Warden plays on but our embed sits paused past any grace period —
+   almost always an autoplay block that only a tap on Spotify's own button can lift */
+function spotEmbedStalled() {
+  const s = spotifyShared;
+  if (!spotFollowing || !spotEmbed || !s || !s.playing || !s.track) return false;
+  if (Date.now() - spotLastCmd < 6000) return false;
+  if (!spotEmbedState) return true;
+  if (spotPreview && spotExpectedPos() > (spotEmbedState.duration || 0)) return false; /* echo spent, not stuck */
+  return !!spotEmbedState.isPaused;
+}
+function spotUpdateTuck() {
+  const wrap = document.getElementById("bv-embedwrap");
+  if (wrap) wrap.classList.toggle("tucked", !spotEmbedStalled());
+}
+
+/* ── the bar itself ── */
+function fmtMs(ms) {
+  const s = Math.max(0, Math.round(ms / 1000));
+  return Math.floor(s / 60) + ":" + ("0" + (s % 60)).slice(-2);
+}
+function renderMusic() {
+  const el = document.getElementById("bardveil");
+  if (!el) return;
+  if (!SYNC_ON) { el.innerHTML = ""; return; }
+  /* skeleton once: the strip re-renders freely, the embed's iframe must survive it */
+  if (!document.getElementById("bv-music")) {
+    el.innerHTML = `<div id="bv-music"></div><div id="bv-embedwrap" class="tucked" hidden><div id="bv-embed"></div></div>`;
+  }
+  const strip = document.getElementById("bv-music");
+  const wrap = document.getElementById("bv-embedwrap");
+  const s = spotifyShared;
+  wrap.hidden = IS_MASTER || !spotFollowing;
+
+  /* the Warden, not yet bound: the one-time binding ritual */
+  if (IS_MASTER && (!spot.refresh || spot.role !== "master")) {
+    const sig = "bind";
+    if (el.dataset.sig !== sig) {
+      el.dataset.sig = sig;
+      strip.innerHTML = `<div class="music">
+        <div class="art silent">♪</div>
+        <div class="tinfo">
+          <div class="tname">The Bard's Veil sleeps</div>
+          <div class="mnote">Paste thy Spotify app Client ID and bind — the table shall echo whatever thy Spotify client plays. (App redirect URI must be <code>${escapeHtml(SPOT_REDIRECT)}</code>.)</div>
+        </div>
+        <input id="bv-cid" placeholder="Spotify Client ID" value="${escapeHtml(spot.clientId || "")}"
+          oninput="spot.clientId=this.value;saveSpot()">
+        <button class="mbtn" onclick="spotAuthorize()">⚶ BIND SPOTIFY</button>
+      </div>`;
+    }
+    return;
+  }
+
+  /* nothing broadcast yet and nothing to offer: keep the strip out of the way */
+  if (!s && !IS_MASTER) { el.dataset.sig = ""; strip.innerHTML = ""; wrap.hidden = true; return; }
+
+  const silent = !s || s.silent || !s.track;
+  const t = !silent ? s.track : null;
+  let right = "";
+  if (IS_MASTER) {
+    right = `<button class="mbtn quiet" onclick="spotUnbind()" title="sever the binding">✕ unbind</button>`;
+  } else if (spotFollowing && spotPreview) {
+    right = `<a class="mbtn" href="https://open.spotify.com" target="_blank" rel="noopener"
+        title="this browser only hears 30-second echoes — sign into spotify.com, then return">⚜ SIGN IN FOR THE FULL BALLAD</a>
+      <button class="mbtn quiet" onclick="spotRemountEmbed()" title="already signed in? reforge the player">⟳ signed in</button>
+      <button class="mbtn quiet" onclick="spotStopListening()">✕</button>`;
+  } else if (spotFollowing) {
+    right = `<button class="mbtn quiet" onclick="spotStopListening()">✕ silence it here</button>`;
+  } else {
+    right = `<button class="mbtn" onclick="spotBeginListening()" title="follow the Warden's music on this device — full songs if this browser is signed into spotify.com, else 30s echoes">♪ HEAR IT HERE</button>`;
+  }
+  const sig = JSON.stringify([silent, t && t.uri, s && s.playing, right]);
+  if (el.dataset.sig !== sig) {
+    el.dataset.sig = sig;
+    strip.innerHTML = `<div class="music">
+      ${t && t.art ? `<img class="art" src="${escapeHtml(t.art)}" alt="">` : `<div class="art silent">♪</div>`}
+      <div class="tinfo">
+        <div class="tname">${silent ? "The hall stands silent" : escapeHtml(t.name)}</div>
+        <div class="tartist">${silent ? (IS_MASTER ? "play something in thy Spotify client and it shall carry" : "the Warden has queued no ballad") : escapeHtml(t.artists) + (s.playing ? "" : " · (held)")}</div>
+        ${silent ? "" : `<div class="bar"><i id="bv-fill"></i></div>`}
+      </div>
+      ${silent ? "" : `<div class="ttime" id="bv-time"></div>`}
+      ${right}
+    </div>`;
+  }
+  if (!IS_MASTER && spotFollowing && !spotEmbed) spotEnsureEmbed(); /* returning listener: remount */
+  spotTickUi();
+}
+function spotTickUi() { /* cheap 1s tick: only the progress bar, clock, and embed tuck move */
+  spotUpdateTuck();
+  const s = spotifyShared;
+  if (!s || !s.track) return;
+  const fill = document.getElementById("bv-fill"), time = document.getElementById("bv-time");
+  const pos = spotExpectedPos(), dur = s.track.durationMs || 1;
+  if (fill) fill.style.width = Math.min(100, (pos / dur) * 100) + "%";
+  if (time) time.textContent = fmtMs(pos) + " / " + fmtMs(dur);
+}
+
+/* boot: finish an OAuth round-trip if one is in flight, then take up our role */
+(async () => {
+  if (!SYNC_ON) return;
+  if (SPOT_CODE && spot.verifier) {
+    try {
+      await spotToken({ grant_type: "authorization_code", code: SPOT_CODE, redirect_uri: SPOT_REDIRECT, code_verifier: spot.verifier });
+      delete spot.verifier; saveSpot();
+    } catch { /* the gate refused; the bind button remains */ }
+  }
+  renderMusic();
+  if (IS_MASTER && spot.refresh && spot.role === "master") spotMasterTick();
+  setInterval(spotTickUi, 1000);
+})();
 
 applyTheme();
 renderTabs();

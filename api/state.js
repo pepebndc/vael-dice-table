@@ -1,10 +1,11 @@
 import { put, list } from "@vercel/blob";
 
-// Per-player bundles plus one shared "npcs" bundle the Warden (?master) edits.
+// Per-player bundles plus shared bundles the Warden (?master) edits:
+// "npcs" (the bestiary) and "spotify" (the Bard's Veil now-playing broadcast).
 const CHARS = new Set(["paco", "ray", "odinson"]);
-const SHARED = new Set(["npcs"]);
+const SHARED = new Set(["npcs", "spotify"]);
 // Every blob this table can hold — a fixed set, so reads never need list().
-const KEYS = ["paco", "ray", "odinson", "npcs"];
+const KEYS = ["paco", "ray", "odinson", "npcs", "spotify"];
 
 // The store's public origin (e.g. https://xxxx.public.blob.vercel-storage.com).
 // Cached in module scope across warm invocations so GET costs zero Advanced
