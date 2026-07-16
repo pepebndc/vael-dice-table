@@ -52,14 +52,19 @@ export default async function handler(req, res) {
     if (JSON.stringify(bundle).length > 100000) {
       return res.status(413).json({ error: "too large" });
     }
-    const result = await put(`${prefix}${who}.json`, JSON.stringify(bundle), {
-      access: "public",
-      addRandomSuffix: false,
-      allowOverwrite: true,
-      contentType: "application/json",
-    });
-    if (!BASE && result && result.url) BASE = new URL(result.url).origin; // learn the base for free
-    return res.status(200).json({ ok: true });
+    try {
+      const result = await put(`${prefix}${who}.json`, JSON.stringify(bundle), {
+        access: "public",
+        addRandomSuffix: false,
+        allowOverwrite: true,
+        contentType: "application/json",
+      });
+      if (!BASE && result && result.url) BASE = new URL(result.url).origin; // learn the base for free
+      return res.status(200).json({ ok: true });
+    } catch (e) {
+      // Most likely no Blob store is connected (missing BLOB_READ_WRITE_TOKEN).
+      return res.status(500).json({ error: "blob write failed", hint: String((e && e.message) || e) });
+    }
   }
 
   res.setHeader("Allow", "GET, PUT");
