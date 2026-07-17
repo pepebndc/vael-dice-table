@@ -2037,9 +2037,84 @@ for (const [item, dir, tracks] of BARD_LIB) {
 let bardShared = null; /* the Warden's broadcast, as last seen */
 let bardFollowing = localStorage.getItem("diceTableBardFollow") === "on";
 let bardStalled = false; /* the browser refused autoplay — one tap will fix it */
-const bardAudio = new Audio();
-bardAudio.preload = "auto";
-bardAudio.volume = Math.min(1, Math.max(0, parseFloat(localStorage.getItem("diceTableBardVol") || "0.7")));
+/* ── voices & crossfade: each track gets its own <audio> "voice". A new verse
+   fades in while the old voice fades out — and every retired voice carries an
+   unconditional kill-timer, so however fast the moods are swapped, the old
+   music ALWAYS stops. At most one retired voice may linger mid-fade; any
+   further swap kills the eldest outright. ── */
+const BARD_FADE_MS = 1500;
+let bardVol = Math.min(1, Math.max(0, parseFloat(localStorage.getItem("diceTableBardVol") || "0.7")));
+let bardAudio = null;  /* the current voice (null while the hall is silent) */
+let bardRetired = [];  /* voices still fading out */
+function bardFade(a, to, ms, then) {
+  clearInterval(a._fade);
+  const from = a.volume, t0 = performance.now();
+  a._fade = setInterval(() => {
+    const k = Math.min(1, (performance.now() - t0) / ms);
+    try { a.volume = Math.max(0, Math.min(1, from + (to - from) * k)); } catch {}
+    if (k >= 1) { clearInterval(a._fade); if (then) then(); }
+  }, 50);
+}
+function bardKill(a) {
+  if (!a) return;
+  clearInterval(a._fade);
+  clearTimeout(a._deathknell);
+  try { a.pause(); a.removeAttribute("src"); a.load(); } catch {}
+  bardRetired = bardRetired.filter(x => x !== a);
+}
+function bardRetire(a, fadeMs) { /* fade out, then die — and die regardless if the fade misbehaves */
+  if (!a) return;
+  bardRetired.push(a);
+  while (bardRetired.length > 1) bardKill(bardRetired.shift());
+  bardFade(a, 0, fadeMs, () => bardKill(a));
+  a._deathknell = setTimeout(() => bardKill(a), fadeMs + 500);
+}
+function bardNewVoice(url, posSec) {
+  if (bardAudio) { bardRetire(bardAudio, BARD_FADE_MS); bardAudio = null; }
+  const a = new Audio();
+  a.preload = "auto";
+  a.volume = 0;
+  a.src = url;
+  if (posSec > 0.5) a.currentTime = posSec;
+  a.addEventListener("ended", () => { /* the song ends → the Warden strikes up the next verse */
+    if (a !== bardAudio) return;
+    if (IS_MASTER && bardShared && bardShared.track && bardShared.playing) bardPlayMood(bardShared.track.mood);
+  });
+  a.addEventListener("error", () => {
+    if (a !== bardAudio) return;
+    if (IS_MASTER && bardShared && bardShared.track && bardShared.playing) bardSkip();
+  });
+  bardAudio = a;
+  return a;
+}
+function bardTryPlay() { /* start (or resume) the current voice, fading it in */
+  const a = bardAudio;
+  if (!a) return;
+  a._wantPause = false;
+  a.play()
+    .then(() => {
+      if (a !== bardAudio) { bardKill(a); return; } /* superseded while starting */
+      bardFade(a, bardVol, BARD_FADE_MS);
+      if (bardStalled) { bardStalled = false; renderMusic(); }
+    })
+    .catch(() => { /* autoplay refused — surface the LET IT SOUND button (players) */
+      if (a !== bardAudio) { bardKill(a); return; }
+      if (!IS_MASTER && !bardStalled) { bardStalled = true; bvOpen = true; renderMusic(); }
+    });
+}
+function bardHold(a, fadeMs) { /* soft-pause the current voice (it stays current, for resume) */
+  if (!a) return;
+  a._wantPause = true;
+  bardFade(a, 0, fadeMs, () => { if (a._wantPause) a.pause(); });
+}
+function bardSetVolume(v) {
+  bardVol = Math.min(1, Math.max(0, parseFloat(v) || 0));
+  localStorage.setItem("diceTableBardVol", String(bardVol));
+  if (bardAudio && !bardAudio._wantPause) {
+    clearInterval(bardAudio._fade);
+    try { bardAudio.volume = bardVol; } catch {}
+  }
+}
 
 /* the no-repeat songbook: tracks already sung at this table, per mood */
 const BARD_PLAYED_LS = "diceTableBardPlayed:" + TABLE;
@@ -2072,7 +2147,7 @@ function bardSyncPush() { /* re-anchor progress and offer the bundle to the tabl
   if (bardShared && bardShared.playing) {
     bardHeartbeat = setInterval(() => { /* gentle 45s re-anchor for late joiners & drift */
       if (!bardShared || !bardShared.track) return;
-      bardShared = { ...bardShared, progressMs: Math.round(bardAudio.currentTime * 1000), fetchedAt: Date.now() };
+      bardShared = { ...bardShared, progressMs: bardAudio ? Math.round(bardAudio.currentTime * 1000) : bardExpectedPos(), fetchedAt: Date.now() };
       markDirty("music");
     }, 45000);
   }
@@ -2082,9 +2157,8 @@ function bardPlayMood(mood) {
   const t = bardPick(mood);
   bardShared = { playing: true, progressMs: 0, fetchedAt: Date.now(),
     track: { url: t.url, name: t.name, mood, durationMs: t.dur * 1000 } };
-  bardAudio.src = t.url;
-  bardAudio.currentTime = 0;
-  bardAudio.play().catch(() => {});
+  bardNewVoice(t.url, 0); /* crossfade: the old verse bows out as this one rises */
+  bardTryPlay();
   bardArmWatchdog();
   bardSyncPush();
   renderMusic();
@@ -2093,22 +2167,25 @@ function bardSkip() { if (IS_MASTER && bardShared && bardShared.track) bardPlayM
 function bardPauseToggle() {
   if (!IS_MASTER || !bardShared || !bardShared.track) return;
   const playing = !bardShared.playing;
-  bardShared = { ...bardShared, playing, progressMs: Math.round(bardAudio.currentTime * 1000), fetchedAt: Date.now() };
-  if (playing) bardAudio.play().catch(() => {}); else bardAudio.pause();
+  const posMs = bardAudio ? Math.round(bardAudio.currentTime * 1000) : bardExpectedPos();
+  bardShared = { ...bardShared, playing, progressMs: posMs, fetchedAt: Date.now() };
+  if (playing) {
+    if (!bardAudio) bardNewVoice(bardShared.track.url, posMs / 1000);
+    bardTryPlay();
+  } else {
+    bardHold(bardAudio, 400);
+  }
   bardSyncPush();
   renderMusic();
 }
 function bardQuench() { /* silence the hall */
   if (!IS_MASTER) return;
-  bardAudio.pause();
-  bardAudio.removeAttribute("src");
+  bardRetire(bardAudio, 700);
+  bardAudio = null;
   bardShared = { silent: true, playing: false, fetchedAt: Date.now() };
   bardSyncPush();
   renderMusic();
 }
-bardAudio.addEventListener("ended", () => { /* the Warden's song ends → the next verse of the same mood */
-  if (IS_MASTER && bardShared && bardShared.track && bardShared.playing) bardPlayMood(bardShared.track.mood);
-});
 /* a few archive nodes flake on the open-ended range browsers send — if a verse
    can't start within 8s (or errors outright), the Warden sings the next one;
    the no-repeat memory keeps the lost verse from being picked again soon */
@@ -2117,25 +2194,11 @@ function bardArmWatchdog() {
   clearTimeout(bardWatchdog);
   if (!IS_MASTER) return;
   bardWatchdog = setTimeout(() => {
-    if (IS_MASTER && bardShared && bardShared.playing && bardAudio.readyState < 2) bardSkip();
+    if (IS_MASTER && bardShared && bardShared.playing && (!bardAudio || bardAudio.readyState < 2)) bardSkip();
   }, 8000);
 }
-bardAudio.addEventListener("error", () => {
-  if (IS_MASTER && bardShared && bardShared.track && bardShared.playing) bardSkip();
-});
-function bardSetVolume(v) {
-  bardAudio.volume = Math.min(1, Math.max(0, parseFloat(v) || 0));
-  localStorage.setItem("diceTableBardVol", String(bardAudio.volume));
-}
 
-/* ── the players' side: a plain <audio>, held to the Warden's moment ── */
-function bardTryPlay() {
-  bardAudio.play()
-    .then(() => { if (bardStalled) { bardStalled = false; renderMusic(); } })
-    .catch(() => { /* autoplay refused — surface the LET IT SOUND button */
-      if (!bardStalled) { bardStalled = true; bvOpen = true; renderMusic(); }
-    });
-}
+/* ── the players' side: voices of their own, held to the Warden's moment ── */
 function followMusic(force) {
   if (IS_MASTER || !bardFollowing) return;
   const s = bardShared;
@@ -2143,15 +2206,14 @@ function followMusic(force) {
   const posMs = bardExpectedPos();
   if (!s.track || s.silent || !s.playing || posMs >= (s.track.durationMs || 0) - 500) {
     /* silent, held, or the song has run out while the Warden's away */
-    if (!bardAudio.paused) bardAudio.pause();
+    if (bardAudio && !bardAudio.paused) bardHold(bardAudio, 400);
     return;
   }
   const pos = posMs / 1000;
-  if (bardAudio.src !== s.track.url) {
-    bardAudio.src = s.track.url;
-    bardAudio.currentTime = pos;
+  if (!bardAudio || bardAudio.src !== s.track.url) {
+    bardNewVoice(s.track.url, pos); /* crossfade to the Warden's new verse */
     bardTryPlay();
-  } else if (bardAudio.paused || force) {
+  } else if (bardAudio.paused || bardAudio._wantPause || force) {
     bardAudio.currentTime = pos;
     bardTryPlay();
   } else if (Math.abs(bardAudio.currentTime - pos) > 3) {
@@ -2167,7 +2229,7 @@ function bardListen() { /* a user gesture, so the browser lets the music out */
 function bardSilence() {
   bardFollowing = false;
   localStorage.setItem("diceTableBardFollow", "off");
-  bardAudio.pause();
+  bardHold(bardAudio, 400);
   renderMusic();
 }
 
@@ -2236,7 +2298,7 @@ function renderMusic() {
     </div>
     ${grid}
     <div class="bvfoot">
-      <input type="range" min="0" max="1" step="0.05" value="${bardAudio.volume}" oninput="bardSetVolume(this.value)" title="volume on this device">
+      <input type="range" min="0" max="1" step="0.05" value="${bardVol}" oninput="bardSetVolume(this.value)" title="volume on this device">
       <span class="mnote">ballads: Kevin MacLeod · incompetech.com · CC BY · via archive.org</span>
     </div>`;
   }
