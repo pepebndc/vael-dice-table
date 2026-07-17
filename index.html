@@ -2069,13 +2069,11 @@ function bardRetire(a, fadeMs) { /* fade out, then die — and die regardless if
   bardFade(a, 0, fadeMs, () => bardKill(a));
   a._deathknell = setTimeout(() => bardKill(a), fadeMs + 500);
 }
-function bardNewVoice(url, posSec) {
-  if (bardAudio) { bardRetire(bardAudio, BARD_FADE_MS); bardAudio = null; }
+function bardMakeVoice(url) { /* a wired voice, not yet the current one */
   const a = new Audio();
   a.preload = "auto";
   a.volume = 0;
   a.src = url;
-  if (posSec > 0.5) a.currentTime = posSec;
   a.addEventListener("ended", () => { /* the song ends → the Warden strikes up the next verse */
     if (a !== bardAudio) return;
     if (IS_MASTER && bardShared && bardShared.track && bardShared.playing) bardPlayMood(bardShared.track.mood);
@@ -2084,6 +2082,12 @@ function bardNewVoice(url, posSec) {
     if (a !== bardAudio) return;
     if (IS_MASTER && bardShared && bardShared.track && bardShared.playing) bardSkip();
   });
+  return a;
+}
+function bardNewVoice(url, posSec) {
+  if (bardAudio) { bardRetire(bardAudio, BARD_FADE_MS); bardAudio = null; }
+  const a = bardMakeVoice(url);
+  if (posSec > 0.5) a.currentTime = posSec;
   bardAudio = a;
   return a;
 }
@@ -2119,17 +2123,35 @@ function bardSetVolume(v) {
 /* the no-repeat songbook: tracks already sung at this table, per mood */
 const BARD_PLAYED_LS = "diceTableBardPlayed:" + TABLE;
 let bardPlayed = new Set(JSON.parse(localStorage.getItem(BARD_PLAYED_LS) || "[]"));
-function bardPick(mood) {
+function bardPick(mood) { /* choose a fresh verse; the songbook is only marked when it's actually taken */
   const pool = BARD_TRACKS.filter(t => t.mood === mood);
   let fresh = pool.filter(t => !bardPlayed.has(t.url));
   if (!fresh.length) { /* the mood's songbook is spent — turn back to page one */
     for (const t of pool) bardPlayed.delete(t.url);
     fresh = pool;
   }
-  const t = fresh[Math.floor(Math.random() * fresh.length)];
+  return fresh[Math.floor(Math.random() * fresh.length)];
+}
+function bardCommit(t) {
   bardPlayed.add(t.url);
   localStorage.setItem(BARD_PLAYED_LS, JSON.stringify([...bardPlayed]));
-  return t;
+}
+
+/* ── the Warden's quiver: each mood keeps its next verse chosen ahead of time
+   and PRELOADED, so mood changes and auto-advance start near-instantly ── */
+const bardQueue = {}; /* mood → {t, a: warmed Audio, never yet played} */
+function bardEnsureQueued(mood) {
+  if (!IS_MASTER || bardQueue[mood]) return;
+  const t = bardPick(mood);
+  bardQueue[mood] = { t, a: bardMakeVoice(t.url) };
+}
+function bardTakeQueued(mood) { /* consume the queued verse and start warming its successor */
+  const q = bardQueue[mood];
+  delete bardQueue[mood];
+  setTimeout(() => bardEnsureQueued(mood), 800);
+  const taken = q || (() => { const t = bardPick(mood); return { t, a: bardMakeVoice(t.url) }; })();
+  bardCommit(taken.t);
+  return taken;
 }
 function bardExpectedPos() {
   const s = bardShared;
@@ -2152,13 +2174,39 @@ function bardSyncPush() { /* re-anchor progress and offer the bundle to the tabl
     }, 45000);
   }
 }
+let bardPending = null, bardMisfires = 0;
 function bardPlayMood(mood) {
   if (!IS_MASTER) return;
-  const t = bardPick(mood);
-  bardShared = { playing: true, progressMs: 0, fetchedAt: Date.now(),
+  const { t, a } = bardTakeQueued(mood);
+  const token = { a };
+  if (bardPending) bardKill(bardPending.a); /* faster fingers — the un-struck verse dies */
+  bardPending = token;
+  a._wantPause = false;
+  a.volume = 0;
+  /* start it silently NOW (keeps the user-gesture) — the old verse keeps singing
+     until this one is audibly rolling, then we cross the fade */
+  a.addEventListener("playing", () => {
+    if (bardPending !== token) { bardKill(a); return; }
+    bardPending = null;
+    bardMisfires = 0;
+    bardStrike(a, t, mood);
+  }, { once: true });
+  const misfire = () => { /* dead file or dead node — next verse, up to 3 tries */
+    if (bardPending !== token) return;
+    bardPending = null;
+    bardKill(a);
+    if (bardMisfires++ < 3) bardPlayMood(mood);
+  };
+  a.addEventListener("error", misfire, { once: true });
+  setTimeout(misfire, 7000);
+  a.play().catch(misfire);
+}
+function bardStrike(a, t, mood) { /* the new verse is sounding: cross the fade and tell the table */
+  if (bardAudio && bardAudio !== a) bardRetire(bardAudio, BARD_FADE_MS);
+  bardAudio = a;
+  bardFade(a, bardVol, BARD_FADE_MS);
+  bardShared = { playing: true, progressMs: Math.round(a.currentTime * 1000), fetchedAt: Date.now(),
     track: { url: t.url, name: t.name, mood, durationMs: t.dur * 1000 } };
-  bardNewVoice(t.url, 0); /* crossfade: the old verse bows out as this one rises */
-  bardTryPlay();
   bardArmWatchdog();
   bardSyncPush();
   renderMusic();
@@ -2180,6 +2228,7 @@ function bardPauseToggle() {
 }
 function bardQuench() { /* silence the hall */
   if (!IS_MASTER) return;
+  if (bardPending) { bardKill(bardPending.a); bardPending = null; }
   bardRetire(bardAudio, 700);
   bardAudio = null;
   bardShared = { silent: true, playing: false, fetchedAt: Date.now() };
@@ -2199,6 +2248,7 @@ function bardArmWatchdog() {
 }
 
 /* ── the players' side: voices of their own, held to the Warden's moment ── */
+let bardPendingP = null; /* a player's voice still warming up */
 function followMusic(force) {
   if (IS_MASTER || !bardFollowing) return;
   const s = bardShared;
@@ -2206,13 +2256,32 @@ function followMusic(force) {
   const posMs = bardExpectedPos();
   if (!s.track || s.silent || !s.playing || posMs >= (s.track.durationMs || 0) - 500) {
     /* silent, held, or the song has run out while the Warden's away */
+    if (bardPendingP) { bardKill(bardPendingP); bardPendingP = null; }
     if (bardAudio && !bardAudio.paused) bardHold(bardAudio, 400);
     return;
   }
   const pos = posMs / 1000;
   if (!bardAudio || bardAudio.src !== s.track.url) {
-    bardNewVoice(s.track.url, pos); /* crossfade to the Warden's new verse */
-    bardTryPlay();
+    if (bardPendingP && bardPendingP.src === s.track.url) return; /* already tuning this one */
+    if (bardPendingP) bardKill(bardPendingP);
+    /* the old verse keeps singing while the new one loads; cross the fade
+       only once sound is truly rolling */
+    const a = bardMakeVoice(s.track.url);
+    bardPendingP = a;
+    a.addEventListener("playing", () => {
+      if (bardPendingP !== a) { bardKill(a); return; }
+      bardPendingP = null;
+      a.currentTime = bardExpectedPos() / 1000; /* align at the moment it actually sounds */
+      if (bardAudio) bardRetire(bardAudio, BARD_FADE_MS);
+      bardAudio = a;
+      bardFade(a, bardVol, BARD_FADE_MS);
+      if (bardStalled) { bardStalled = false; renderMusic(); }
+    }, { once: true });
+    a.play().catch(() => { /* autoplay refused — surface the LET IT SOUND button */
+      if (bardPendingP !== a) { bardKill(a); return; }
+      bardKill(a); bardPendingP = null;
+      if (!bardStalled) { bardStalled = true; bvOpen = true; renderMusic(); }
+    });
   } else if (bardAudio.paused || bardAudio._wantPause || force) {
     bardAudio.currentTime = pos;
     bardTryPlay();
@@ -2229,6 +2298,7 @@ function bardListen() { /* a user gesture, so the browser lets the music out */
 function bardSilence() {
   bardFollowing = false;
   localStorage.setItem("diceTableBardFollow", "off");
+  if (bardPendingP) { bardKill(bardPendingP); bardPendingP = null; }
   bardHold(bardAudio, 400);
   renderMusic();
 }
@@ -2318,6 +2388,11 @@ function bardTickUi() { /* cheap 1s tick: only the progress bars and clock move 
 
 renderMusic();
 setInterval(bardTickUi, 1000);
+/* the Warden's quiver fills at rest: the first verse of every mood warms up in
+   the background (staggered, so the table's own loading isn't elbowed aside) */
+if (IS_MASTER) {
+  Object.keys(BARD_MOODS).forEach((mood, i) => setTimeout(() => bardEnsureQueued(mood), 2000 + i * 700));
+}
 
 applyTheme();
 renderTabs();
