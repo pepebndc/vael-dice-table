@@ -495,13 +495,13 @@
     position: absolute; top: calc(100% + 8px); right: 0; width: min(560px, 92vw); z-index: 30;
     filter: drop-shadow(0 10px 24px rgba(3,10,20,.55));
   }
-  #bardveil .music {
-    display: flex; align-items: center; gap: 12px;
+  #bv-music {
     background: linear-gradient(160deg, var(--frost) 0%, var(--frost2) 100%);
     border: 1px solid var(--frost-edge); border-radius: 10px;
     padding: 10px 14px; color: var(--ink);
     box-shadow: 0 6px 18px rgba(4, 12, 24, .35);
   }
+  #bardveil .music { display: flex; align-items: center; gap: 12px; }
   #bardveil .art {
     width: 46px; height: 46px; border-radius: 6px; flex: none;
     border: 1px solid var(--frost-edge); object-fit: cover; background: #bdd5ea;
@@ -527,11 +527,21 @@
     padding: 6px 10px; flex: 1; min-width: 0;
   }
   #bardveil .mnote { font-size: 12px; font-style: italic; color: var(--ink-soft); }
-  #bv-embedwrap { margin-top: 8px; border-radius: 12px; overflow: hidden; }
-  #bv-embedwrap iframe { display: block; }
-  /* the embed stays mounted (it IS the audio) but out of sight; it surfaces only
-     when the browser refuses to play without a tap on Spotify's own button */
-  #bv-embedwrap.tucked { height: 0; margin-top: 0; opacity: 0; pointer-events: none; }
+  #bardveil .moodgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 10px; }
+  #bardveil .moodbtn {
+    display: flex; align-items: center; gap: 7px; padding: 8px 10px; cursor: pointer;
+    font-family: "Cinzel", serif; font-weight: 700; font-size: 11.5px; letter-spacing: .5px;
+    background: rgba(255, 255, 255, .45); color: var(--ink);
+    border: 1px solid var(--frost-edge); border-radius: 8px; transition: all .15s; text-align: left;
+  }
+  #bardveil .moodbtn:hover { transform: translateY(1px); background: rgba(255, 255, 255, .7); }
+  #bardveil .moodbtn.on {
+    background: linear-gradient(180deg, #3a2c12, #221806); color: #ffd97a;
+    border-color: #c89a3c; box-shadow: 0 0 10px rgba(224,154,60,.35);
+  }
+  #bardveil .bvfoot { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+  #bardveil .bvfoot input[type=range] { flex: none; width: 110px; accent-color: var(--accent); padding: 0; background: none; border: none; }
+  #bardveil .bvfoot .mnote { flex: 1; text-align: right; font-size: 11px; }
   #bardveil code { font-size: 11px; background: rgba(30, 50, 71, .1); padding: 1px 5px; border-radius: 4px; }
 </style>
 </head>
@@ -659,19 +669,6 @@ const CHARS = {
 
 let mode = "norm";
 let current = "paco";
-
-/* ── returning from Spotify's gate: the OAuth redirect swaps our query string for
-   ?code=…&state=…, where state carries the original ?master&table. Put the real
-   query back BEFORE anyone reads location.search, and keep the code for later. ── */
-let SPOT_CODE = null;
-{
-  const q = new URLSearchParams(location.search);
-  if (q.get("code") && q.has("state")) {
-    SPOT_CODE = q.get("code");
-    const restored = q.get("state") || "";
-    history.replaceState(null, "", location.pathname + (restored ? "?" + restored : ""));
-  }
-}
 
 /* ── the Warden's flag (?master): may summon & banish foes; reused for more later ── */
 const IS_MASTER = new URLSearchParams(location.search).has("master");
@@ -1412,8 +1409,8 @@ async function pushDirty() {
   const whos = Object.keys(dirtyChars);
   dirtyChars = {};
   for (const who of whos) {
-    const bundle = who === "spotify"
-      ? { ...(spotifyShared || {}), updatedAt: syncMeta.spotify || Date.now() }
+    const bundle = who === "music"
+      ? { ...(bardShared || {}), updatedAt: syncMeta.music || Date.now() }
       : who === "npcs"
       ? { npcs, updatedAt: syncMeta.npcs || Date.now() }
       : {
@@ -1480,10 +1477,10 @@ async function pullState() {
       }
       /* the Bard's Veil: only the Warden authors it, so the Warden never applies it.
          Deliberately not part of `changed` — a music heartbeat shouldn't re-render sheets. */
-      const rs = remote.spotify;
-      if (!IS_MASTER && rs && rs.updatedAt && (syncMeta.spotify || 0) < rs.updatedAt) {
-        spotifyShared = rs;
-        syncMeta.spotify = rs.updatedAt;
+      const rs = remote.music;
+      if (!IS_MASTER && rs && rs.updatedAt && (syncMeta.music || 0) < rs.updatedAt) {
+        bardShared = rs;
+        syncMeta.music = rs.updatedAt;
         localStorage.setItem("diceTableSyncMeta", JSON.stringify(syncMeta));
         renderMusic(); followMusic();
       }
@@ -1528,245 +1525,653 @@ function wakePolling() { /* resume on focus / tab-visible / re-attune */
   pollTick();
 }
 
-/* ── The Bard's Veil: Spotify, synced from the Warden's own client ──────────────
-   The Warden binds their Spotify account once (OAuth PKCE — all client-side, no
-   secret). This tab then polls what their NATIVE Spotify client is playing and
-   broadcasts it through the same blob channel as everything else ("spotify"
-   bundle: track, position, play state). Every player sees the now-playing bar;
-   to HEAR it, players use Spotify's public iframe embed, steered to the Warden's
-   track and position — no player sign-in, no app allowlist, no Premium needed
-   (browsers signed into spotify.com get full tracks; others get 30s previews). */
-const SPOT_LS = "diceTableSpotify";
-let spot = JSON.parse(localStorage.getItem(SPOT_LS) || "{}"); /* {clientId, role, verifier, access, refresh, expiresAt} — the Warden only */
-let spotifyShared = null;                 /* the Warden's broadcast, as last seen */
-let spotEmbed = null, spotEmbedUri = null, spotEmbedState = null; /* the listeners' iframe controller */
-let spotPreview = false; /* embed is serving 30s echoes → this browser isn't signed into spotify.com */
-let spotLastCmd = 0;     /* when we last told the embed to play — grace period before declaring it stuck */
-let spotFollowing = localStorage.getItem("diceTableSpotifyFollow") === "on";
-const SPOT_REDIRECT = location.origin + location.pathname;
-
-function saveSpot() { localStorage.setItem(SPOT_LS, JSON.stringify(spot)); }
-
-/* ── PKCE plumbing ── */
-function spotRandom(n) {
-  return Array.from(crypto.getRandomValues(new Uint8Array(n)), b => ("0" + b.toString(16)).slice(-2)).join("");
-}
-async function spotChallenge(v) {
-  const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(v));
-  return btoa(String.fromCharCode(...new Uint8Array(d))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-async function spotAuthorize() { /* the Warden only — they own the app, so no allowlist entries are ever needed */
-  const clientId = (spot.clientId || "").trim();
-  if (!clientId) return;
-  spot.clientId = clientId; spot.verifier = spotRandom(48); spot.role = "master";
-  delete spot.access; delete spot.refresh; delete spot.expiresAt;
-  saveSpot();
-  const p = new URLSearchParams({
-    response_type: "code", client_id: clientId,
-    scope: "user-read-playback-state user-read-currently-playing",
-    redirect_uri: SPOT_REDIRECT,
-    code_challenge_method: "S256",
-    code_challenge: await spotChallenge(spot.verifier),
-    state: location.search.slice(1), /* so ?master&table survive the round-trip */
-  });
-  location.href = "https://accounts.spotify.com/authorize?" + p;
-}
-async function spotToken(body) {
-  const r = await fetch("https://accounts.spotify.com/api/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ client_id: spot.clientId, ...body }),
-  });
-  if (!r.ok) throw new Error("token " + r.status);
-  const t = await r.json();
-  spot.access = t.access_token;
-  if (t.refresh_token) spot.refresh = t.refresh_token;
-  spot.expiresAt = Date.now() + Math.max(0, (t.expires_in || 3600) - 60) * 1000;
-  saveSpot();
-}
-async function spotAccess() {
-  if (!spot.access) return null;
-  if (Date.now() >= (spot.expiresAt || 0)) {
-    if (!spot.refresh) return null;
-    try { await spotToken({ grant_type: "refresh_token", refresh_token: spot.refresh }); }
-    catch { return null; }
-  }
-  return spot.access;
-}
-function spotUnbind() {
-  const keepId = spot.clientId;
-  if (IS_MASTER && spotifyShared) { /* tell the table the music has stopped */
-    spotifyShared = { clientId: keepId, silent: true, playing: false, fetchedAt: Date.now() };
-    markDirty("spotify");
-  }
-  clearTimeout(spotMasterTimer);
-  spot = { clientId: keepId };
-  saveSpot();
-  renderMusic();
-}
-
-/* ── the Warden's side: poll the native client, broadcast on change ── */
-let spotMasterTimer = null, spotLastPush = 0;
-async function spotMasterTick() {
-  clearTimeout(spotMasterTimer);
-  if (!IS_MASTER || !spot.refresh || spot.role !== "master") return;
-  const tok = await spotAccess();
-  if (!tok) { /* refresh failed (offline?) — keep trying, the binding may recover */
-    renderMusic();
-    spotMasterTimer = setTimeout(spotMasterTick, 15000);
-    return;
-  }
-  try {
-    const r = await fetch("https://api.spotify.com/v1/me/player/currently-playing", {
-      headers: { Authorization: "Bearer " + tok },
+/* ── The Bard's Veil: the table's music, sung from the free halls of the
+   Internet Archive (all tracks by Kevin MacLeod, incompetech.com, CC BY —
+   credit shown in the popover). The Warden picks a MOOD; a shuffled,
+   no-repeat procession of tracks plays on the Warden's device and is
+   broadcast ("music" bundle: track URL, position, play state) so every
+   attuned device plays the very same moment. No accounts, no keys, no
+   services — just <audio> and the archive. */
+const BARD_LIB = [
+  ["Kevin-MacLeod_Thatched-Villagers_2014_FullAlbum", "Thatched Villagers", [
+    ["01", "Angevin", 281, "tavern"],
+    ["03", "Bushwick Tarantella", 204, "tavern"],
+    ["04", "Cattails", 159, "tavern"],
+    ["07", "Miri's Magic Dance", 94, "tavern"],
+    ["08", "Nu Flute", 83, "tavern"],
+    ["09", "Padanaya Blokov", 128, "tavern"],
+    ["10", "Pippin the Hunchback", 193, "tavern"],
+    ["14", "Thatched Villagers", 245, "tavern"],
+    ["05", "For Originz", 219, "travel"],
+    ["06", "Living Voyage", 209, "travel"],
+    ["16", "Unanswered Questions", 166, "mystery"],
+    ["11", "Rites", 127, "dread"],
+    ["12", "Ritual", 264, "dread"],
+    ["13", "Temple of the Manes", 156, "dread"],
+  ]],
+  ["Kevin-MacLeod_Traveller_2016_FullAlbum", "Traveller", [
+    ["01", "Lachaim", 211, "tavern"],
+    ["10", "Duet Musette", 140, "tavern"],
+    ["03", "Finding Movement", 116, "travel"],
+    ["04", "Angevin B", 129, "travel"],
+    ["05", "Moorland", 339, "travel"],
+    ["07", "Indore", 225, "travel"],
+    ["08", "Errigal", 134, "travel"],
+    ["09", "Skye Cuillin", 193, "travel"],
+    ["12", "Untitled African Rhythm", 98, "travel"],
+    ["13", "Shenyang", 151, "travel"],
+    ["02", "Arcane", 323, "mystery"],
+    ["06", "Hidden Past", 192, "mystery"],
+  ]],
+  ["Kevin-MacLeod_Netherworld-Shanty_2014_FullAlbum", "Netherworld Shanty", [
+    ["04", "Gypsy Shoegazer", 260, "tavern"],
+    ["05", "Industrial Music Box", 103, "dread"],
+    ["07", "Mind Scrape", 168, "dread"],
+    ["08", "Monster Promenade", 150, "dread"],
+    ["09", "Netherworld Shanty", 195, "dread"],
+    ["10", "One-eyed Maestro", 118, "dread"],
+    ["14", "Waltz of the Carnies", 238, "dread"],
+    ["15", "With a Creation", 315, "dread"],
+  ]],
+  ["Kevin-MacLeod_Virtutes-Instrumenti_2014_FullAlbum", "Virtutes Instrumenti", [
+    ["03", "Lord of the Land", 186, "tavern"],
+    ["04", "Minstrel Guild", 186, "tavern"],
+    ["09", "Suonatore di Liuto", 144, "tavern"],
+    ["10", "Teller of the Tales", 212, "tavern"],
+    ["01", "Drums of the Deep", 174, "boss"],
+    ["11", "The Pyre", 233, "boss"],
+    ["05", "Peaceful Desolation", 91, "rest"],
+    ["02", "Ignosi", 184, "court"],
+    ["06", "Procession of the King", 184, "court"],
+    ["07", "Second Coming", 132, "court"],
+    ["08", "Sonata 17", 152, "court"],
+    ["14", "Virtutes Vocis", 259, "court"],
+    ["15", "With Regards", 178, "court"],
+  ]],
+  ["Kevin-MacLeod_Spirit_2017_FullAlbum", "Spirit", [
+    ["01", "Nightdreams", 396, "travel"],
+    ["02", "River Fire", 400, "travel"],
+    ["03", "Sky of Our Ancestors", 431, "travel"],
+    ["04", "Spirit of the Girl", 413, "travel"],
+    ["05", "Silver Flame", 396, "travel"],
+    ["06", "Truth in the Stones", 373, "travel"],
+  ]],
+  ["Kevin-MacLeod_Wonders_2014_FullAlbum", "Wonders", [
+    ["01", "Arcadia", 98, "travel"],
+    ["02", "Cherry Blossom", 130, "travel"],
+    ["08", "Earth Prelude", 229, "travel"],
+    ["09", "Enchanted Valley", 190, "travel"],
+    ["04", "Consequence", 303, "mystery"],
+    ["19", "Ominous Intro", 141, "dread"],
+    ["10", "Exotic Battle", 169, "battle"],
+    ["21", "Stoneworld Battle", 234, "battle"],
+    ["03", "Colossus", 271, "boss"],
+    ["05", "Dragon and Toast", 353, "boss"],
+    ["23", "The Path of the Goblin King", 206, "boss"],
+    ["06", "Dreamlike", 99, "rest"],
+    ["07", "Dreamy Flashback", 127, "rest"],
+    ["15", "Lasting Hope", 144, "rest"],
+    ["22", "Water Prelude", 325, "rest"],
+    ["12", "Wizardtorium", 208, "court"],
+    ["13", "Frost Waltz", 135, "court"],
+    ["14", "Frozen Star", 221, "court"],
+    ["17", "Melodie Victoria", 241, "court"],
+    ["18", "Moonlight Hall", 198, "court"],
+    ["24", "The Snow Queen", 220, "court"],
+  ]],
+  ["Kevin-MacLeod_Mystery_2014_FullAlbum", "Mystery", [
+    ["02", "Invariance", 217, "mystery"],
+    ["03", "Lost Frontier", 265, "mystery"],
+    ["04", "Myst", 185, "mystery"],
+    ["05", "Not As It Seems", 101, "mystery"],
+    ["08", "Satiate", 192, "mystery"],
+    ["09", "Serpentine Trek", 107, "mystery"],
+    ["10", "Smoking Gun", 188, "mystery"],
+    ["11", "Sneaky Snitch", 137, "mystery"],
+    ["12", "Spider Eyes", 215, "mystery"],
+    ["14", "The Other Side of the Door", 168, "mystery"],
+    ["15", "The Second Coming", 146, "mystery"],
+  ]],
+  ["Kevin-MacLeod_Mystic-Force_2016_FullAlbum", "Mystic Force", [
+    ["01", "Floating Cities", 184, "mystery"],
+    ["02", "Thunderbird", 362, "mystery"],
+    ["03", "Crypto", 204, "mystery"],
+    ["04", "Odyssey", 306, "mystery"],
+    ["05", "Destiny Day", 192, "mystery"],
+    ["06", "Mystic Force", 224, "mystery"],
+    ["07", "Spellbound", 230, "mystery"],
+    ["08", "Heavy Heart", 297, "mystery"],
+    ["09", "Unwritten Return", 309, "mystery"],
+    ["11", "Infinite Perspective", 345, "mystery"],
+  ]],
+  ["Kevin-MacLeod_Darkness_2014_FullAlbum", "Darkness", [
+    ["13", "Our Story Begins", 85, "mystery"],
+    ["04", "Dark Times", 184, "dread"],
+    ["05", "Darkest Child", 239, "dread"],
+    ["08", "Fire Prelude", 304, "dread"],
+    ["09", "Gagool", 345, "dread"],
+    ["10", "Grim League", 160, "dread"],
+    ["14", "Phantasm", 219, "dread"],
+    ["15", "Power Restored", 73, "dread"],
+    ["16", "Shamanistic", 182, "dread"],
+    ["17", "Showdown", 73, "dread"],
+    ["19", "Some Amount of Evil", 123, "dread"],
+    ["22", "Tectonic", 83, "dread"],
+    ["23", "The Chamber", 114, "dread"],
+    ["02", "Air Prelude", 341, "grief"],
+  ]],
+  ["Kevin-MacLeod_The-Descent_2014_FullAlbum", "The Descent", [
+    ["05", "Constance", 140, "mystery"],
+    ["03", "Chee Zee Caves V2", 232, "dread"],
+    ["18", "Interloper", 263, "dread"],
+    ["19", "Nerves", 172, "dread"],
+    ["26", "The Descent", 192, "dread"],
+    ["04", "Clenched Teeth", 91, "battle"],
+    ["11", "Failing Defense", 106, "battle"],
+    ["12", "Five Armies", 156, "battle"],
+    ["13", "Full On", 156, "battle"],
+    ["16", "Impending Boom", 157, "battle"],
+    ["17", "Intended Force", 112, "battle"],
+    ["25", "Stormfront", 334, "boss"],
+    ["28", "Undaunted", 213, "boss"],
+    ["27", "Truth of the Legend", 93, "court"],
+  ]],
+  ["Kevin-MacLeod_Final-Battle_2016_FullAlbum", "Final Battle", [
+    ["06", "Lost Time", 227, "mystery"],
+    ["04", "Mary Celeste", 162, "dread"],
+    ["07", "This House", 269, "dread"],
+    ["13", "Myst on the Moor", 229, "dread"],
+    ["17", "Welcome to HorrorLand", 250, "dread"],
+    ["01", "Urban Gauntlet", 209, "boss"],
+    ["02", "Motherlode", 237, "boss"],
+    ["03", "Ready Aim Fire", 217, "boss"],
+    ["05", "Dreams Become Real", 410, "boss"],
+    ["08", "Intrepid", 191, "boss"],
+    ["09", "Crowd Hammer", 207, "boss"],
+    ["10", "Final Battle of the Dark Wizards", 272, "boss"],
+    ["11", "Clash Defiant", 376, "boss"],
+    ["12", "Corruption", 423, "boss"],
+    ["14", "Curse of the Scarab", 327, "boss"],
+    ["15", "Ryno’s Theme", 186, "boss"],
+    ["16", "Killers", 305, "boss"],
+  ]],
+  ["Kevin-MacLeod_Shadowlands_2017_FullAlbum", "Shadowlands", [
+    ["01", "Shadowlands, Horizon", 220, "dread"],
+    ["02", "Shadowlands, Bridge", 208, "dread"],
+    ["03", "Shadowlands, Machine", 230, "dread"],
+    ["04", "Shadowlands, Breath", 230, "dread"],
+    ["05", "Shadowlands, Antechamber", 178, "dread"],
+    ["06", "Shadowland, the Pit", 206, "dread"],
+    ["07", "Shadowlands, Codex", 212, "dread"],
+  ]],
+  ["Kevin-MacLeod_Supernatural-Haunting_2014_FullAlbum", "Supernatural Haunting", [
+    ["01", "Apprehension", 80, "dread"],
+    ["02", "Awkward Meeting", 84, "dread"],
+    ["03", "Classic Horror 1", 91, "dread"],
+    ["05", "Controlled Chaos", 352, "dread"],
+    ["06", "Deep Noise", 152, "dread"],
+    ["08", "Ghost Story", 320, "dread"],
+    ["09", "Gloom Horizon", 128, "dread"],
+    ["10", "Spacial Winds", 146, "dread"],
+    ["11", "It is Lost", 175, "dread"],
+    ["12", "Land of Phantoms", 120, "dread"],
+    ["13", "Land of the Dead", 261, "dread"],
+    ["14", "Long Note Four", 600, "dread"],
+    ["16", "Night of Chaos", 210, "dread"],
+    ["17", "Return of Lazarus", 271, "dread"],
+    ["18", "The Voices", 255, "dread"],
+    ["19", "Thunder Dreams", 230, "dread"],
+    ["20", "Unnatural Situation", 158, "dread"],
+    ["21", "Unseen Horrors", 251, "dread"],
+    ["22", "Zombie Hoodoo", 87, "dread"],
+  ]],
+  ["Kevin-MacLeod_Ossuary_2015_FullAlbum", "Ossuary", [
+    ["01", "Ossuary 1 - A Beginning", 188, "dread"],
+    ["02", "Ossuary 2 - Turn", 288, "dread"],
+    ["03", "Ossuary 3 - Words", 237, "dread"],
+    ["04", "Ossuary 4 - Animate", 197, "dread"],
+    ["05", "Ossuary 5 - Rest", 236, "dread"],
+    ["06", "Ossuary 6 - Air", 250, "dread"],
+    ["07", "Ossuary 7 - Resolve", 258, "dread"],
+  ]],
+  ["Kevin-MacLeod_Horror-Landscapes_2014_FullAlbum", "Horror Soundscapes", [
+    ["01", "Decisions", 89, "dread"],
+    ["02", "Fantastic Dim Bar", 189, "dread"],
+    ["03", "Inexorable", 389, "dread"],
+    ["04", "Rising", 151, "dread"],
+    ["05", "The Escalation", 327, "dread"],
+    ["06", "Vanes", 106, "dread"],
+    ["07", "Long Note One", 440, "dread"],
+    ["08", "Long Note Two", 462, "dread"],
+    ["09", "Long Note Three", 192, "dread"],
+  ]],
+  ["Kevin-MacLeod_Dark-World_2014_FullAlbum", "Dark World", [
+    ["01", "Darkening Developments", 132, "dread"],
+    ["02", "Deep Haze", 122, "dread"],
+    ["03", "Ghost Processional (digitally processed)", 106, "dread"],
+    ["05", "Gnarled Situation", 85, "dread"],
+    ["06", "Grave Blow", 102, "dread"],
+    ["07", "Halls of the Undead", 293, "dread"],
+    ["08", "Professor and the Plant", 141, "dread"],
+    ["09", "Rising Game", 112, "dread"],
+    ["10", "Shores of Avalon", 236, "dread"],
+    ["11", "Unlight", 189, "dread"],
+  ]],
+  ["Kevin-MacLeod_Ghostpocalypse_2014_FullAlbum", "Ghostpocalypse", [
+    ["01", "Departure", 78, "dread"],
+    ["02", "The Call", 168, "dread"],
+    ["03", "Road of Trials", 151, "dread"],
+    ["04", "Temptress", 115, "dread"],
+    ["05", "Apotheosis", 109, "dread"],
+    ["06", "Crossing the Threshold", 109, "dread"],
+    ["07", "Master", 119, "dread"],
+    ["08", "Epilog", 103, "dread"],
+  ]],
+  ["Kevin-MacLeod_Madness-and-Paranoia_2014_FullAlbum", "Madness and Paranoia", [
+    ["01", "Aftermath", 193, "dread"],
+    ["02", "Anxiety", 111, "dread"],
+    ["03", "Blue Sizzle", 146, "dread"],
+    ["05", "Classic Horror 2", 75, "dread"],
+    ["06", "Come Play with Me", 132, "dread"],
+    ["07", "Day of Chaos", 250, "dread"],
+    ["08", "Decay", 278, "dread"],
+    ["09", "Digital Bark", 267, "dread"],
+    ["10", "Distant Tension", 228, "dread"],
+    ["11", "Echoes of Time v2", 285, "dread"],
+    ["12", "Echoes of Time", 285, "dread"],
+    ["13", "Dark Walk", 86, "dread"],
+    ["14", "Gathering Darkness", 265, "dread"],
+    ["15", "Inner Sanctum", 250, "dread"],
+    ["16", "Penumbra", 296, "dread"],
+    ["17", "Quinn’s Song- A New Man", 105, "dread"],
+    ["18", "Quinn’s Song- First Night", 312, "dread"],
+    ["21", "Trepidation", 75, "dread"],
+    ["22", "Unease", 88, "dread"],
+    ["23", "Very Low Note", 83, "dread"],
+  ]],
+  ["Kevin-MacLeod_Tenebrous-Brothers-Carnival_2014_FullAlbum", "Tenebrous Brothers Carnival", [
+    ["01", "Prelude", 237, "dread"],
+    ["02", "Act One", 123, "dread"],
+    ["04", "Act Two", 176, "dread"],
+    ["05", "Intermission", 267, "dread"],
+    ["06", "Mermaid", 435, "dread"],
+    ["07", "Act Three", 202, "dread"],
+  ]],
+  ["Kevin-Macleod_Action-Cuts_2014_FullAlbum", "Action Cuts", [
+    ["02", "Action", 195, "battle"],
+    ["03", "All This", 229, "battle"],
+    ["04", "Black Vortex", 170, "battle"],
+    ["05", "Chase", 133, "battle"],
+    ["06", "Cortosis", 153, "battle"],
+    ["07", "Crisis", 87, "battle"],
+    ["09", "Evil March", 71, "battle"],
+    ["14", "Machinations", 105, "battle"],
+    ["16", "Mighty and Meek", 100, "battle"],
+    ["18", "Movement Proposition", 141, "battle"],
+    ["20", "Plans in Motion", 150, "battle"],
+    ["21", "Prelude and Action", 99, "battle"],
+    ["26", "Volatile Reaction", 165, "battle"],
+    ["12", "Heroic Age", 97, "court"],
+    ["19", "Noble Race", 316, "court"],
+    ["25", "Unity", 264, "court"],
+  ]],
+  ["Kevin-MacLeod_Impact_2014_FullAlbum", "Impact", [
+    ["01", "Allegretto", 182, "battle"],
+    ["02", "Andante", 169, "battle"],
+    ["04", "Lento", 211, "battle"],
+    ["05", "Moderato", 76, "battle"],
+  ]],
+  ["Kevin-MacLeod_Primal-Drive_2014_FullAlbum", "Primal Drive", [
+    ["01", "Birch Run", 267, "battle"],
+    ["02", "Black Bird", 174, "battle"],
+    ["03", "Chee Zee Jungle", 162, "battle"],
+    ["04", "Dama-May", 314, "battle"],
+    ["05", "Double Drift", 248, "battle"],
+    ["06", "Firebrand", 359, "battle"],
+    ["07", "Firesong", 213, "battle"],
+    ["08", "Freddy's Menagerie", 204, "battle"],
+    ["09", "Lagoa V2", 194, "battle"],
+    ["10", "Lagoa V1", 231, "battle"],
+    ["11", "Leblon", 197, "battle"],
+    ["12", "Night of the Owl", 233, "battle"],
+    ["13", "Quasi Motion", 152, "battle"],
+    ["14", "Rite of Passage", 281, "battle"],
+    ["15", "StompDance", 223, "battle"],
+    ["16", "Suvaco do Cristo", 157, "battle"],
+    ["17", "Thunderhead", 175, "battle"],
+    ["18", "Tikopia", 228, "battle"],
+    ["19", "Witch Hunt", 211, "battle"],
+    ["20", "World Vice", 204, "battle"],
+  ]],
+  ["Kevin-MacLeod_Vicious_2016_FullAlbum", "Vicious", [
+    ["01", "Pyro Flow", 234, "boss"],
+    ["02", "Vicious", 225, "boss"],
+    ["03", "Lewis and DeKalb", 197, "boss"],
+    ["04", "Chillin Hard", 234, "boss"],
+    ["05", "Basic Implosion", 190, "boss"],
+  ]],
+  ["Kevin-MacLeod_Destruction-Device_2017_FullAlbum", "Destruction Device", [
+    ["01", "Wretched Destroyer", 198, "boss"],
+    ["02", "Obliteration", 149, "boss"],
+    ["03", "Grim Idol", 225, "boss"],
+    ["04", "Graveyard Shift", 197, "boss"],
+    ["05", "Malicious", 223, "boss"],
+    ["06", "Return of the Mummy", 170, "boss"],
+    ["07", "Eternal Terminal", 198, "boss"],
+    ["08", "Nightmare Machine", 226, "boss"],
+    ["09", "Death and Axes", 168, "boss"],
+    ["10", "Darkling", 170, "boss"],
+    ["11", "Aggressor", 239, "boss"],
+    ["12", "Unholy Knight", 154, "boss"],
+    ["13", "Burnt Spirit", 115, "boss"],
+  ]],
+  ["Kevin-MacLeod_Sadness_2014_FullAlbum", "Sadness", [
+    ["02", "Anguish", 239, "grief"],
+    ["03", "Colorless Aura", 158, "grief"],
+    ["04", "Death of Kings", 144, "grief"],
+    ["05", "Decline", 207, "grief"],
+    ["06", "Dissappointment", 118, "grief"],
+    ["07", "End of the Era", 211, "grief"],
+    ["08", "Fairytale Waltz", 99, "grief"],
+    ["09", "For the Fallen", 95, "grief"],
+    ["10", "Grave Matters", 95, "grief"],
+    ["11", "Lamentation", 198, "grief"],
+    ["12", "Longing and Concern", 74, "grief"],
+    ["14", "Past the Edge", 78, "grief"],
+    ["15", "Pensif", 129, "grief"],
+    ["16", "Plaint", 197, "grief"],
+    ["17", "Promising Relationship", 108, "grief"],
+    ["18", "Road to Hell", 111, "grief"],
+    ["19", "Serene", 131, "grief"],
+    ["22", "Time Passes", 71, "grief"],
+    ["23", "Trio for Piano Cello and Clarinet", 159, "grief"],
+    ["24", "Unpromised", 113, "grief"],
+  ]],
+  ["Kevin-MacLeod_Bitter-Suite_2014_FullAlbum", "Bitter Suite", [
+    ["01", "A Little Faith", 88, "grief"],
+    ["02", "Agnus Dei X", 91, "grief"],
+    ["03", "Ghost Dance", 73, "grief"],
+    ["04", "Mourning Song", 92, "grief"],
+    ["05", "Painful Disorientation", 91, "grief"],
+    ["06", "Relent", 175, "grief"],
+    ["08", "Sinfonia Number 5", 128, "grief"],
+    ["09", "Sonatina in C Minor", 78, "grief"],
+    ["10", "The Endless", 210, "grief"],
+    ["12", "Trio for Piano Violin and Viola", 85, "grief"],
+    ["13", "Virtutes Instrumenti", 262, "grief"],
+  ]],
+  ["Kevin-MacLeod_Touching-Moments_2014_FullAlbum", "Touching Moments", [
+    ["01", "Circle", 204, "grief"],
+    ["02", "Melody", 109, "grief"],
+    ["03", "Pulse", 103, "grief"],
+    ["04", "Deeper", 208, "grief"],
+    ["05", "Higher", 174, "grief"],
+  ]],
+  ["Kevin-Macleod_Atlantean-Twilight_2014_FullAlbum", "Atlantean Twilight", [
+    ["04", "Cryptic Sorrow", 480, "grief"],
+    ["08", "Heartbreaking", 96, "grief"],
+    ["09", "Loss", 134, "grief"],
+    ["14", "Parting of the Ways - Part 1", 564, "grief"],
+    ["15", "Parting of the Ways - Part 2", 398, "grief"],
+    ["17", "Reminiscing", 152, "grief"],
+    ["19", "Sad Trio", 252, "grief"],
+    ["01", "Atlantean Twilight", 171, "rest"],
+    ["02", "Awaiting Return", 105, "rest"],
+    ["03", "Blue Paint", 131, "rest"],
+    ["06", "Evening Fall (Harp)", 145, "rest"],
+    ["10", "Luminous Rain", 114, "rest"],
+    ["12", "Moonstone", 255, "rest"],
+    ["21", "Stoic Morning", 155, "rest"],
+    ["22", "With the Sea", 163, "rest"],
+    ["11", "March of the Mind", 168, "court"],
+    ["13", "Overture", 224, "court"],
+    ["16", "Pride", 349, "court"],
+    ["20", "Sovereign", 372, "court"],
+  ]],
+  ["Kevin-MacLeod_Calming_2014_FullAlbum", "Calming", [
+    ["01", "Autumn Day", 185, "rest"],
+    ["02", "Bathed in the Light", 166, "rest"],
+    ["03", "Calmant", 204, "rest"],
+    ["04", "Carefree", 205, "rest"],
+    ["05", "Clean Soul", 307, "rest"],
+    ["06", "Danse Morialta", 236, "rest"],
+    ["07", "Dream Culture", 214, "rest"],
+    ["08", "Enchanted Journey", 270, "rest"],
+    ["09", "Impromptu in Quarter Comma Meantone", 153, "rest"],
+    ["10", "Inner Light", 576, "rest"],
+    ["12", "Meditation Impromptu 01", 213, "rest"],
+    ["13", "Meditation Impromptu 02", 249, "rest"],
+    ["14", "Meditation Impromptu 03", 255, "rest"],
+    ["15", "On the Passing of Time", 225, "rest"],
+    ["18", "Silver Blue Light", 350, "rest"],
+    ["19", "Smoother Move", 278, "rest"],
+    ["20", "Sovereign Quarter", 291, "rest"],
+    ["22", "Windswept", 208, "rest"],
+    ["23", "Winter Reflections", 142, "rest"],
+  ]],
+  ["Kevin-MacLeod_The-Ambient_2014_FullAlbum", "The Ambient", [
+    ["02", "Lightless Dawn", 380, "rest"],
+    ["04", "Perspectives", 718, "rest"],
+    ["08", "Spacial Harvest", 654, "rest"],
+  ]],
+  ["Kevin-MacLeod_Ethereal_2014_FullAlbum", "Ethereal", [
+    ["01", "Alien Restaurant", 373, "rest"],
+    ["02", "Cupid’s Revenge", 106, "rest"],
+    ["03", "Dark Fog", 239, "rest"],
+    ["05", "Hypnothis", 283, "rest"],
+    ["06", "Legend of One", 140, "rest"],
+    ["07", "Mirage", 240, "rest"],
+    ["09", "New Direction", 680, "rest"],
+    ["10", "Orion 300XB", 223, "rest"],
+    ["12", "Scissors", 208, "rest"],
+    ["13", "Vulcan", 215, "rest"],
+    ["14", "Finding the Balance", 208, "rest"],
+    ["15", "Darkness is Coming", 171, "rest"],
+    ["16", "Modern Vibes", 122, "rest"],
+  ]],
+  ["Kevin-MacLeod_Dream-Catcher_2019_FullAlbum", "Dream Catcher", [
+    ["01", "Dream Catcher", 377, "rest"],
+  ]],
+  ["Kevin-MacLeod_Healing_2014_FullAlbum", "Healing", [
+    ["01", "Aretes", 276, "rest"],
+    ["03", "Clear Waters", 128, "rest"],
+    ["04", "Continue Life", 114, "rest"],
+    ["05", "Friday Morning", 210, "rest"],
+    ["06", "Healing", 520, "rest"],
+    ["07", "Heartwarming", 72, "rest"],
+    ["09", "Midday Dance", 91, "rest"],
+    ["10", "Midsummer Sky", 114, "rest"],
+    ["11", "Numinous Shine", 258, "rest"],
+    ["12", "Overheat", 423, "rest"],
+    ["13", "Sapphire Isle", 132, "rest"],
+    ["14", "Simple Duet", 199, "rest"],
+    ["15", "Starry", 199, "rest"],
+    ["16", "There is Romance", 198, "rest"],
+    ["18", "Two Together", 117, "rest"],
+    ["19", "Village Dawn", 87, "rest"],
+    ["20", "Vision of Persistence", 224, "rest"],
+    ["21", "White", 185, "rest"],
+  ]],
+  ["Kevin-MacLeod_video-Classica_2014_FullAlbum", "video Classica", [
+    ["04", "Chee Zee Caves", 232, "court"],
+    ["05", "Crusade", 199, "court"],
+    ["06", "Jaunty Gumption", 118, "court"],
+    ["09", "Oppressive Gloom", 199, "court"],
+    ["10", "Video Dungeon Boss", 134, "court"],
+    ["11", "Video Dungeon Crawl", 213, "court"],
+  ]],
+  ["Kevin-MacLeod_Carpe-Diem_2016_FullAlbum", "Carpe Diem", [
+    ["01", "Groundwork", 169, "court"],
+    ["02", "Voice Over Under", 197, "court"],
+    ["03", "River Valley Breakdown", 366, "court"],
+    ["06", "Wagon Wheel", 304, "court"],
+    ["07", "Lively Lumpsucker", 222, "court"],
+    ["09", "Batty McFaddin S", 244, "court"],
+    ["10", "Nano Hoedown", 154, "court"],
+    ["11", "Carpe Diem", 295, "court"],
+    ["12", "Ultra Polka", 226, "court"],
+    ["13", "The Show Must Be Go", 216, "court"],
+  ]],
+];
+const BARD_MOODS = {
+  tavern:  ["🍺", "Tavern & Hearth"],
+  travel:  ["🥾", "Roads & Wilds"],
+  mystery: ["🔍", "Mystery & Intrigue"],
+  dread:   ["🕯", "Dread & Shadow"],
+  battle:  ["⚔️", "Battle"],
+  boss:    ["🐉", "Doom & Dragonfire"],
+  grief:   ["🥀", "Grief & Ashes"],
+  rest:    ["🌙", "Rest & Embers"],
+  court:   ["👑", "Courts & Wonder"],
+};
+const BARD_TRACKS = []; /* flat: {url, name, dur (s), mood} */
+for (const [item, dir, tracks] of BARD_LIB) {
+  for (const [nn, title, dur, mood] of tracks) {
+    BARD_TRACKS.push({
+      url: encodeURI(`https://archive.org/download/${item}/${dir}/Kevin MacLeod - ${nn} - ${title}.mp3`),
+      name: title, dur, mood,
     });
-    if (r.status === 401) spot.expiresAt = 0; /* stale token — refresh on next tick */
-    let now = null;
-    if (r.status === 200) {
-      const j = await r.json();
-      if (j && j.item) now = {
-        clientId: spot.clientId,
-        playing: !!j.is_playing,
-        progressMs: j.progress_ms || 0,
-        fetchedAt: Date.now(),
-        track: {
-          uri: j.item.uri,
-          ctx: (j.context && j.context.uri) || null, /* playlist/album, so followers auto-advance */
-          name: j.item.name,
-          artists: (j.item.artists || []).map(a => a.name).join(", "),
-          art: (j.item.album && j.item.album.images && j.item.album.images.length)
-            ? j.item.album.images[j.item.album.images.length - 1].url : "",
-          durationMs: j.item.duration_ms || 0,
-        },
-      };
-    } else if (r.status === 204) { /* nothing playing anywhere */
-      now = { clientId: spot.clientId, silent: true, playing: false, fetchedAt: Date.now() };
-    }
-    if (now) {
-      const prev = spotifyShared;
-      const expected = prev && prev.track
-        ? prev.progressMs + (prev.playing ? now.fetchedAt - prev.fetchedAt : 0)
-        : 0;
-      const turned = !prev
-        || (prev.track && prev.track.uri) !== (now.track && now.track.uri)
-        || !!prev.playing !== !!now.playing
-        || !!prev.silent !== !!now.silent;
-      const seeked = !turned && now.track && Math.abs((now.progressMs || 0) - expected) > 4000;
-      spotifyShared = now;
-      renderMusic();
-      /* write on real change, else a 30s heartbeat to re-anchor progress — keeps blob writes low */
-      if (turned || seeked || Date.now() - spotLastPush > 30000) {
-        spotLastPush = Date.now();
-        markDirty("spotify");
-      }
-    }
-  } catch { /* offline; try again next tick */ }
-  spotMasterTimer = setTimeout(spotMasterTick, 5000);
-}
-
-/* ── the players' side: Spotify's public iframe embed, steered to follow the
-   Warden. No OAuth, no allowlist, no Premium — the embed is open to everyone.
-   Browsers signed into spotify.com hear full tracks; the rest, 30s previews. ── */
-function spotEnsureEmbed() {
-  if (IS_MASTER || spotEmbed) return;
-  const host = document.getElementById("bv-embed");
-  if (!host) return;
-  const boot = (api) => {
-    const uri = (spotifyShared && spotifyShared.track && spotifyShared.track.uri) || "";
-    api.createController(host, { uri, width: "100%", height: 80 }, (ctrl) => {
-      spotEmbed = ctrl;
-      spotEmbedUri = uri;
-      ctrl.addListener("playback_update", (e) => {
-        spotEmbedState = { ...e.data, at: Date.now() }; /* position/duration in ms, isPaused */
-        /* signed-out browsers get 30s echoes: the embed reports ~30s where the
-           Warden's broadcast says the ballad runs longer. Nudge them to sign in. */
-        const real = spotifyShared && spotifyShared.track && spotifyShared.track.uri === spotEmbedUri
-          ? spotifyShared.track.durationMs : 0;
-        const preview = !!(e.data.duration && e.data.duration <= 32000 && real > 40000);
-        if (preview !== spotPreview) { spotPreview = preview; renderMusic(); }
-      });
-      followMusic(true);
-      renderMusic();
-    });
-  };
-  if (window.__spotEmbedApi) { boot(window.__spotEmbedApi); return; }
-  if (!document.getElementById("spotembedapi")) {
-    window.onSpotifyIframeApiReady = (api) => { window.__spotEmbedApi = api; boot(api); };
-    const s = document.createElement("script");
-    s.id = "spotembedapi"; s.src = "https://open.spotify.com/embed/iframe-api/v1";
-    document.head.appendChild(s);
   }
 }
-function spotBeginListening() { /* a user gesture, so the embed may make sound */
-  spotFollowing = true;
-  localStorage.setItem("diceTableSpotifyFollow", "on");
-  renderMusic();      /* reveals the embed host… */
-  spotEnsureEmbed();  /* …then mounts the controller into it */
-  if (spotEmbed) followMusic(true);
+
+let bardShared = null; /* the Warden's broadcast, as last seen */
+let bardFollowing = localStorage.getItem("diceTableBardFollow") === "on";
+let bardStalled = false; /* the browser refused autoplay — one tap will fix it */
+const bardAudio = new Audio();
+bardAudio.preload = "auto";
+bardAudio.volume = Math.min(1, Math.max(0, parseFloat(localStorage.getItem("diceTableBardVol") || "0.7")));
+
+/* the no-repeat songbook: tracks already sung at this table, per mood */
+const BARD_PLAYED_LS = "diceTableBardPlayed:" + TABLE;
+let bardPlayed = new Set(JSON.parse(localStorage.getItem(BARD_PLAYED_LS) || "[]"));
+function bardPick(mood) {
+  const pool = BARD_TRACKS.filter(t => t.mood === mood);
+  let fresh = pool.filter(t => !bardPlayed.has(t.url));
+  if (!fresh.length) { /* the mood's songbook is spent — turn back to page one */
+    for (const t of pool) bardPlayed.delete(t.url);
+    fresh = pool;
+  }
+  const t = fresh[Math.floor(Math.random() * fresh.length)];
+  bardPlayed.add(t.url);
+  localStorage.setItem(BARD_PLAYED_LS, JSON.stringify([...bardPlayed]));
+  return t;
 }
-function spotStopListening() {
-  spotFollowing = false;
-  localStorage.setItem("diceTableSpotifyFollow", "off");
-  if (spotEmbed) { try { spotEmbed.pause(); } catch {} }
-  renderMusic();
-}
-function spotRemountEmbed() { /* after signing into spotify.com, a fresh iframe picks up the session */
-  if (spotEmbed) { try { spotEmbed.destroy(); } catch {} }
-  spotEmbed = null; spotEmbedUri = null; spotEmbedState = null; spotPreview = false;
-  const wrap = document.getElementById("bv-embedwrap");
-  if (wrap) wrap.innerHTML = `<div id="bv-embed"></div>`;
-  renderMusic();
-  spotEnsureEmbed();
-}
-function spotExpectedPos() {
-  const s = spotifyShared;
+function bardExpectedPos() {
+  const s = bardShared;
   if (!s || !s.track) return 0;
   const pos = s.progressMs + (s.playing ? Date.now() - s.fetchedAt : 0);
   return Math.max(0, Math.min(s.track.durationMs || pos, pos));
 }
-function followMusic(force) {
-  if (IS_MASTER || !spotFollowing || !spotEmbed) return;
-  const s = spotifyShared;
-  if (!s) return;
-  try {
-    const pos = spotExpectedPos();
-    if (!s.track || s.silent || !s.playing) {
-      if (spotEmbedState && !spotEmbedState.isPaused) spotEmbed.pause();
-    } else if (spotPreview && spotEmbedState && s.track.uri === spotEmbedUri && pos > (spotEmbedState.duration || 0)) {
-      /* signed-out preview already spent — don't loop the 30s echo; the bar shows the sign-in nudge */
-      if (!spotEmbedState.isPaused) spotEmbed.pause();
-    } else if (s.track.uri !== spotEmbedUri || force) {
-      spotEmbedUri = s.track.uri;
-      spotLastCmd = Date.now();
-      spotEmbed.loadUri(s.track.uri);
-      spotEmbed.play();
-      spotEmbed.seek(Math.round(pos / 1000));
-    } else if (spotEmbedState) {
-      const est = spotEmbedState.position + (spotEmbedState.isPaused ? 0 : Date.now() - spotEmbedState.at);
-      if (spotEmbedState.isPaused) { spotLastCmd = Date.now(); spotEmbed.play(); spotEmbed.seek(Math.round(pos / 1000)); }
-      else if (Math.abs(est - pos) > 4000) spotEmbed.seek(Math.round(pos / 1000)); /* drifted — step back in line */
-    }
-  } catch { /* the Veil flickers; next pull retries */ }
+
+/* ── the Warden's side: play locally, broadcast every turn of the song ── */
+let bardHeartbeat = null;
+function bardSyncPush() { /* re-anchor progress and offer the bundle to the table */
+  if (!IS_MASTER) return;
+  markDirty("music");
+  clearInterval(bardHeartbeat);
+  if (bardShared && bardShared.playing) {
+    bardHeartbeat = setInterval(() => { /* gentle 45s re-anchor for late joiners & drift */
+      if (!bardShared || !bardShared.track) return;
+      bardShared = { ...bardShared, progressMs: Math.round(bardAudio.currentTime * 1000), fetchedAt: Date.now() };
+      markDirty("music");
+    }, 45000);
+  }
 }
-/* stalled = the Warden plays on but our embed sits paused past any grace period —
-   almost always an autoplay block that only a tap on Spotify's own button can lift */
-function spotEmbedStalled() {
-  const s = spotifyShared;
-  if (!spotFollowing || !spotEmbed || !s || !s.playing || !s.track) return false;
-  if (Date.now() - spotLastCmd < 6000) return false;
-  if (!spotEmbedState) return true;
-  if (spotPreview && spotExpectedPos() > (spotEmbedState.duration || 0)) return false; /* echo spent, not stuck */
-  return !!spotEmbedState.isPaused;
+function bardPlayMood(mood) {
+  if (!IS_MASTER) return;
+  const t = bardPick(mood);
+  bardShared = { playing: true, progressMs: 0, fetchedAt: Date.now(),
+    track: { url: t.url, name: t.name, mood, durationMs: t.dur * 1000 } };
+  bardAudio.src = t.url;
+  bardAudio.currentTime = 0;
+  bardAudio.play().catch(() => {});
+  bardArmWatchdog();
+  bardSyncPush();
+  renderMusic();
 }
-function spotUpdateTuck() {
-  const wrap = document.getElementById("bv-embedwrap");
-  if (!wrap) return;
-  const stalled = spotEmbedStalled();
-  wrap.classList.toggle("tucked", !stalled);
-  if (stalled && !bvOpen) { bvOpen = true; renderMusic(); } /* surface Spotify's own play button */
+function bardSkip() { if (IS_MASTER && bardShared && bardShared.track) bardPlayMood(bardShared.track.mood); }
+function bardPauseToggle() {
+  if (!IS_MASTER || !bardShared || !bardShared.track) return;
+  const playing = !bardShared.playing;
+  bardShared = { ...bardShared, playing, progressMs: Math.round(bardAudio.currentTime * 1000), fetchedAt: Date.now() };
+  if (playing) bardAudio.play().catch(() => {}); else bardAudio.pause();
+  bardSyncPush();
+  renderMusic();
+}
+function bardQuench() { /* silence the hall */
+  if (!IS_MASTER) return;
+  bardAudio.pause();
+  bardAudio.removeAttribute("src");
+  bardShared = { silent: true, playing: false, fetchedAt: Date.now() };
+  bardSyncPush();
+  renderMusic();
+}
+bardAudio.addEventListener("ended", () => { /* the Warden's song ends → the next verse of the same mood */
+  if (IS_MASTER && bardShared && bardShared.track && bardShared.playing) bardPlayMood(bardShared.track.mood);
+});
+/* a few archive nodes flake on the open-ended range browsers send — if a verse
+   can't start within 8s (or errors outright), the Warden sings the next one;
+   the no-repeat memory keeps the lost verse from being picked again soon */
+let bardWatchdog = null;
+function bardArmWatchdog() {
+  clearTimeout(bardWatchdog);
+  if (!IS_MASTER) return;
+  bardWatchdog = setTimeout(() => {
+    if (IS_MASTER && bardShared && bardShared.playing && bardAudio.readyState < 2) bardSkip();
+  }, 8000);
+}
+bardAudio.addEventListener("error", () => {
+  if (IS_MASTER && bardShared && bardShared.track && bardShared.playing) bardSkip();
+});
+function bardSetVolume(v) {
+  bardAudio.volume = Math.min(1, Math.max(0, parseFloat(v) || 0));
+  localStorage.setItem("diceTableBardVol", String(bardAudio.volume));
 }
 
-/* ── the bar itself ── */
+/* ── the players' side: a plain <audio>, held to the Warden's moment ── */
+function bardTryPlay() {
+  bardAudio.play()
+    .then(() => { if (bardStalled) { bardStalled = false; renderMusic(); } })
+    .catch(() => { /* autoplay refused — surface the LET IT SOUND button */
+      if (!bardStalled) { bardStalled = true; bvOpen = true; renderMusic(); }
+    });
+}
+function followMusic(force) {
+  if (IS_MASTER || !bardFollowing) return;
+  const s = bardShared;
+  if (!s) return;
+  const posMs = bardExpectedPos();
+  if (!s.track || s.silent || !s.playing || posMs >= (s.track.durationMs || 0) - 500) {
+    /* silent, held, or the song has run out while the Warden's away */
+    if (!bardAudio.paused) bardAudio.pause();
+    return;
+  }
+  const pos = posMs / 1000;
+  if (bardAudio.src !== s.track.url) {
+    bardAudio.src = s.track.url;
+    bardAudio.currentTime = pos;
+    bardTryPlay();
+  } else if (bardAudio.paused || force) {
+    bardAudio.currentTime = pos;
+    bardTryPlay();
+  } else if (Math.abs(bardAudio.currentTime - pos) > 3) {
+    bardAudio.currentTime = pos; /* drifted from the Warden — step back in line */
+  }
+}
+function bardListen() { /* a user gesture, so the browser lets the music out */
+  bardFollowing = true;
+  localStorage.setItem("diceTableBardFollow", "on");
+  followMusic(true);
+  renderMusic();
+}
+function bardSilence() {
+  bardFollowing = false;
+  localStorage.setItem("diceTableBardFollow", "off");
+  bardAudio.pause();
+  renderMusic();
+}
+
+/* ── the chip and its popover ── */
 function fmtMs(ms) {
   const s = Math.max(0, Math.round(ms / 1000));
   return Math.floor(s / 60) + ":" + ("0" + (s % 60)).slice(-2);
@@ -1776,108 +2181,81 @@ function toggleBardVeil() { bvOpen = !bvOpen; renderMusic(); }
 function renderMusic() {
   const el = document.getElementById("bardveil");
   if (!el) return;
-  if (!SYNC_ON) { el.innerHTML = ""; return; }
-  /* skeleton once: chip + popover; re-renders touch only bv-music, so the
-     embed's iframe (the audio itself) survives every repaint */
+  if (!SYNC_ON && !IS_MASTER) { el.innerHTML = ""; return; }
   if (!document.getElementById("bv-chip")) {
     el.innerHTML = `<button id="bv-chip" onclick="toggleBardVeil()" title="The Bard's Veil — the table's music"><span id="bv-chipname"></span><i id="bv-chipfill"></i></button>
-      <div id="bv-pop" hidden><div id="bv-music"></div><div id="bv-embedwrap" class="tucked" hidden><div id="bv-embed"></div></div></div>`;
+      <div id="bv-pop" hidden><div id="bv-music"></div></div>`;
   }
   const chip = document.getElementById("bv-chip");
   const chipName = document.getElementById("bv-chipname");
   const pop = document.getElementById("bv-pop");
   const strip = document.getElementById("bv-music");
-  const wrap = document.getElementById("bv-embedwrap");
-  const s = spotifyShared;
-  wrap.hidden = IS_MASTER || !spotFollowing;
+  const s = bardShared;
   pop.hidden = !bvOpen;
 
-  /* the Warden, not yet bound: the one-time binding ritual lives in the popover */
-  if (IS_MASTER && (!spot.refresh || spot.role !== "master")) {
-    const sig = "bind|" + bvOpen;
-    el.style.display = "";
-    if (el.dataset.sig !== sig) {
-      el.dataset.sig = sig;
-      chipName.textContent = "♪ BIND THE VEIL";
-      chip.classList.remove("playing");
-      strip.innerHTML = `<div class="music">
-        <div class="art silent">♪</div>
-        <div class="tinfo">
-          <div class="tname">The Bard's Veil sleeps</div>
-          <div class="mnote">Paste thy Spotify app Client ID and bind — the table shall echo whatever thy Spotify client plays. (App redirect URI must be <code>${escapeHtml(SPOT_REDIRECT)}</code>.)</div>
-        </div>
-        <input id="bv-cid" placeholder="Spotify Client ID" value="${escapeHtml(spot.clientId || "")}"
-          oninput="spot.clientId=this.value;saveSpot()">
-        <button class="mbtn" onclick="spotAuthorize()">⚶ BIND SPOTIFY</button>
-      </div>`;
-    }
-    return;
-  }
-
-  /* nothing broadcast yet and nothing to offer: no chip at all */
+  /* players with nothing broadcast yet: no chip at all */
   if (!s && !IS_MASTER) { el.dataset.sig = ""; el.style.display = "none"; return; }
   el.style.display = "";
 
   const silent = !s || s.silent || !s.track;
   const t = !silent ? s.track : null;
+  const mood = t && BARD_MOODS[t.mood] ? BARD_MOODS[t.mood] : ["♪", ""];
   let right = "";
   if (IS_MASTER) {
-    right = `<button class="mbtn quiet" onclick="spotUnbind()" title="sever the binding">✕ unbind</button>`;
-  } else if (spotFollowing && spotPreview) {
-    right = `<a class="mbtn" href="https://open.spotify.com" target="_blank" rel="noopener"
-        title="this browser only hears 30-second echoes — sign into spotify.com, then return">⚜ SIGN IN FOR THE FULL BALLAD</a>
-      <button class="mbtn quiet" onclick="spotRemountEmbed()" title="already signed in? reforge the player">⟳ signed in</button>
-      <button class="mbtn quiet" onclick="spotStopListening()">✕</button>`;
-  } else if (spotFollowing) {
-    right = `<button class="mbtn quiet" onclick="spotStopListening()">✕ silence it here</button>`;
+    right = silent ? "" : `
+      <button class="mbtn quiet" onclick="bardPauseToggle()" title="${s.playing ? "hold the song" : "let it continue"}">${s.playing ? "⏸" : "▶"}</button>
+      <button class="mbtn quiet" onclick="bardSkip()" title="another verse of this mood">⏭</button>
+      <button class="mbtn quiet" onclick="bardQuench()" title="silence the hall">✕</button>`;
+  } else if (bardStalled && bardFollowing) {
+    right = `<button class="mbtn" onclick="bardListen()">⟪ LET IT SOUND ⟫</button>`;
+  } else if (bardFollowing) {
+    right = `<button class="mbtn quiet" onclick="bardSilence()">✕ silence it here</button>`;
   } else {
-    right = `<button class="mbtn" onclick="spotBeginListening()" title="follow the Warden's music on this device — full songs if this browser is signed into spotify.com, else 30s echoes">♪ HEAR IT HERE</button>`;
+    right = `<button class="mbtn" onclick="bardListen()" title="hear the Warden's music on this device">♪ HEAR IT HERE</button>`;
   }
-  const sig = JSON.stringify([silent, t && t.uri, s && s.playing, right, bvOpen]);
+  const grid = IS_MASTER
+    ? `<div class="moodgrid">` + Object.entries(BARD_MOODS).map(([k, [ic, label]]) =>
+        `<button class="moodbtn${t && t.mood === k && s.playing ? " on" : ""}" onclick="bardPlayMood('${k}')">${ic}<span>${label}</span></button>`).join("") + `</div>`
+    : "";
+  const sig = JSON.stringify([silent, t && t.url, s && s.playing, right, bvOpen, bardFollowing, bardStalled]);
   if (el.dataset.sig !== sig) {
     el.dataset.sig = sig;
-    chipName.textContent = silent ? "♪ the hall is silent" : "♪ " + t.name;
+    chipName.textContent = silent ? (IS_MASTER ? "♪ THE BARD'S VEIL" : "♪ the hall is silent") : mood[0] + " " + t.name;
     chip.classList.toggle("playing", !silent && !!s.playing);
     strip.innerHTML = `<div class="music">
-      ${t && t.art ? `<img class="art" src="${escapeHtml(t.art)}" alt="">` : `<div class="art silent">♪</div>`}
+      <div class="art silent">${silent ? "♪" : mood[0]}</div>
       <div class="tinfo">
         <div class="tname">${silent ? "The hall stands silent" : escapeHtml(t.name)}</div>
-        <div class="tartist">${silent ? (IS_MASTER ? "play something in thy Spotify client and it shall carry" : "the Warden has queued no ballad") : escapeHtml(t.artists) + (s.playing ? "" : " · (held)")}</div>
+        <div class="tartist">${silent
+          ? (IS_MASTER ? "choose a mood below and the table shall hear it" : "the Warden has queued no ballad")
+          : escapeHtml(mood[1]) + (s.playing ? "" : " · (held)")}</div>
         ${silent ? "" : `<div class="bar"><i id="bv-fill"></i></div>`}
       </div>
       ${silent ? "" : `<div class="ttime" id="bv-time"></div>`}
       ${right}
+    </div>
+    ${grid}
+    <div class="bvfoot">
+      <input type="range" min="0" max="1" step="0.05" value="${bardAudio.volume}" oninput="bardSetVolume(this.value)" title="volume on this device">
+      <span class="mnote">ballads: Kevin MacLeod · incompetech.com · CC BY · via archive.org</span>
     </div>`;
   }
-  if (!IS_MASTER && spotFollowing && !spotEmbed) spotEnsureEmbed(); /* returning listener: remount */
-  spotTickUi();
+  bardTickUi();
 }
-function spotTickUi() { /* cheap 1s tick: only the progress bar, clock, and embed tuck move */
-  spotUpdateTuck();
-  const s = spotifyShared;
+function bardTickUi() { /* cheap 1s tick: only the progress bars and clock move */
+  const s = bardShared;
   if (!s || !s.track) return;
   const fill = document.getElementById("bv-fill"), time = document.getElementById("bv-time");
   const chipfill = document.getElementById("bv-chipfill");
-  const pos = spotExpectedPos(), dur = s.track.durationMs || 1;
+  const pos = bardExpectedPos(), dur = s.track.durationMs || 1;
   const pct = Math.min(100, (pos / dur) * 100) + "%";
   if (fill) fill.style.width = pct;
   if (chipfill) chipfill.style.width = pct;
   if (time) time.textContent = fmtMs(pos) + " / " + fmtMs(dur);
 }
 
-/* boot: finish an OAuth round-trip if one is in flight, then take up our role */
-(async () => {
-  if (!SYNC_ON) return;
-  if (SPOT_CODE && spot.verifier) {
-    try {
-      await spotToken({ grant_type: "authorization_code", code: SPOT_CODE, redirect_uri: SPOT_REDIRECT, code_verifier: spot.verifier });
-      delete spot.verifier; saveSpot();
-    } catch { /* the gate refused; the bind button remains */ }
-  }
-  renderMusic();
-  if (IS_MASTER && spot.refresh && spot.role === "master") spotMasterTick();
-  setInterval(spotTickUi, 1000);
-})();
+renderMusic();
+setInterval(bardTickUi, 1000);
 
 applyTheme();
 renderTabs();
