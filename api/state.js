@@ -3,11 +3,12 @@
 // the env vars below appear; each poll costs one MGET, each save one SET.
 
 // Per-player bundles plus shared bundles the Warden (?master) edits:
-// "npcs" (the bestiary) and "music" (the Bard's Veil now-playing broadcast).
+// "npcs" (the bestiary), "music" (the Bard's Veil now-playing broadcast)
+// and "map" (the Warden's Chart — shared drawings/annotations).
 const CHARS = new Set(["paco", "ray", "odinson"]);
-const SHARED = new Set(["npcs", "music"]);
+const SHARED = new Set(["npcs", "music", "map"]);
 // Every key this table can hold — a fixed set, so reads are a single MGET.
-const KEYS = ["paco", "ray", "odinson", "npcs", "music"];
+const KEYS = ["paco", "ray", "odinson", "npcs", "music", "map"];
 
 const REST_URL = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
 const REST_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
