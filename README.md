@@ -13,6 +13,7 @@ A self-contained D&D dice table for our Thornback Reaches campaign. One HTML fil
 - Per-player roll journals and HP / spell slot / rage trackers, persisted in localStorage
 - Crit and fumble flourishes, snowfall, and Mount Vael lore throughout
 - The Bard's Veil: a built-in synced soundtrack — the Warden picks a mood (Tavern, Battle, Dread…) and every device plays the same track at the same moment. 400+ CC-BY tracks (~23 hours) by Kevin MacLeod, streamed straight from the Internet Archive. No accounts, no API keys, no services
+- The Warden's Chart: a shared sketchboard / mini-map — the Warden draws (8 ink colors, three quill weights, eraser, undo, two-tap clear) and the whole table sees it live. Toggleable grid with adjustable cell size and shade; players' chip glows when new markings arrive
 
 ## Run
 

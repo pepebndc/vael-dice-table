@@ -544,21 +544,11 @@
   #bardveil .bvfoot .mnote { flex: 1; text-align: right; font-size: 11px; }
   #bardveil code { font-size: 11px; background: rgba(30, 50, 71, .1); padding: 1px 5px; border-radius: 4px; }
 
-  /* ── The Warden's Chart: shared drawings, a chip + popover like the Veil ── */
-  #wchart { position: relative; }
-  #wc-chip {
-    position: relative; display: flex; align-items: center; gap: 6px; max-width: 240px;
-    font-family: "Cinzel", serif; font-weight: 700; font-size: 12px; letter-spacing: 1px;
-    background: linear-gradient(180deg, rgba(24,44,68,.92), rgba(14,28,46,.92));
-    color: #8fb3d1; border: 1px solid #33567c; border-radius: 9px;
-    padding: 10px 14px 12px; cursor: pointer; overflow: hidden; transition: all .2s;
-  }
-  #wc-chip:hover { color: #eaf4fd; transform: translateY(1px); }
-  #wc-chip.fresh { color: #ffd97a; border-color: #c89a3c; box-shadow: 0 0 12px rgba(224,154,60,.35); }
-  #wc-pop {
-    position: absolute; top: calc(100% + 8px); right: 0; width: min(740px, 94vw); z-index: 30;
-    filter: drop-shadow(0 10px 24px rgba(3,10,20,.55));
-  }
+  /* ── The Warden's Chart: a tab of its own beside the party ── */
+  #wchart { margin-bottom: 14px; }
+  .tabs button.fresh { color: #ffd97a; border-color: #c89a3c; box-shadow: 0 0 12px rgba(224,154,60,.4); }
+  /* while the Chart is unfurled, the sheet's own panels step aside */
+  body.chartview .advrow, body.chartview #sheet, body.chartview #inventory, body.chartview #loosedice { display: none; }
   #wc-panel {
     background: linear-gradient(160deg, var(--frost) 0%, var(--frost2) 100%);
     border: 1px solid var(--frost-edge); border-radius: 10px;
@@ -616,8 +606,8 @@
     <div id="tabrow">
       <div class="tabs" id="tabs"></div>
       <div id="bardveil"></div>
-      <div id="wchart"></div>
     </div>
+    <div id="wchart" hidden></div>
     <div id="bestiary"></div>
     <div class="advrow">
       <button class="mode on-norm" id="m-norm" onclick="setMode('norm')">❅ Normal</button>
@@ -626,7 +616,7 @@
     </div>
     <div id="sheet"></div>
     <div id="inventory"></div>
-    <div class="panel">
+    <div class="panel" id="loosedice">
       <h2>Loose Dice</h2>
       <div class="btngrid dice">
         <div class="diecell"><button class="roll-btn" onclick="addDie(4)"><span class="die-ico">▲</span>d4</button><button class="minicast" onclick="freeDie(4)">cast</button></div>
@@ -1391,7 +1381,8 @@ function renderSheet() {
 function renderTabs() {
   const t = document.getElementById("tabs");
   t.innerHTML = Object.keys(CHARS).map(k =>
-    `<button class="${k === current ? "active" : ""}" style="--tabc:${CHARS[k].color}" onclick="current='${k}';applyTheme();renderTabs();renderSheet();renderInventory();renderLog();displayLast()">${CHARS[k].emblem} ${CHARS[k].name}</button>`).join("");
+    `<button class="${k === current && !wcView ? "active" : ""}" style="--tabc:${CHARS[k].color}" onclick="wcView=false;current='${k}';applyTheme();renderTabs();renderSheet();renderInventory();renderLog();displayLast();renderChart()">${CHARS[k].emblem} ${CHARS[k].name}</button>`).join("")
+    + `<button class="${wcView ? "active" : (syncMeta.map || 0) > wcSeen && chart.strokes.length ? "fresh" : ""}" style="--tabc:#4e8f7d" onclick="openChart()" title="the Warden's shared sketches">🗺 The Chart</button>`;
 }
 function clearLog() { logs[current] = []; saveLogs(); markDirty(current); renderLog(); }
 
@@ -2475,7 +2466,7 @@ let chart = (() => {
   return { strokes: [], grid: { on: false, size: 60, hue: "frost" } };
 })();
 
-let wcOpen = false;
+let wcView = false;
 let wcSeen = parseInt(localStorage.getItem(WC_SEEN_LS) || "0", 10) || 0;
 let wcColor = WC_COLORS[0], wcWidth = WC_WIDTHS[1], wcErase = false;
 let wcArmClear = 0; /* two-tap clear: timestamp while armed */
@@ -2651,26 +2642,28 @@ function wcGridToggle() { chart.grid.on = !chart.grid.on; wcCommit(); wcBlit(); 
 function wcGridSize(v) { chart.grid.size = parseInt(v, 10) || 60; wcCommit(); wcBlit(); }
 function wcGridHue(h) { chart.grid.hue = h; wcCommit(); wcBlit(); renderChart(); }
 
-function toggleWChart() {
-  wcOpen = !wcOpen;
-  if (wcOpen) {
-    wcSeen = syncMeta.map || Date.now();
-    localStorage.setItem(WC_SEEN_LS, String(wcSeen));
-  }
+function openChart() {
+  wcView = true;
+  wcSeen = syncMeta.map || Date.now();
+  localStorage.setItem(WC_SEEN_LS, String(wcSeen));
+  renderTabs();
   renderChart(true);
 }
 
 function renderChart(repaint) {
   const el = document.getElementById("wchart");
   if (!el) return;
-  if (!SYNC_ON && !IS_MASTER) { el.innerHTML = ""; return; }
-  if (!document.getElementById("wc-chip")) {
-    el.innerHTML = `<button id="wc-chip" onclick="toggleWChart()" title="The Warden's Chart — sketches shared with the table">🗺 <span id="wc-chipname"></span></button>
-      <div id="wc-pop" hidden><div id="wc-panel">
+  document.body.classList.toggle("chartview", wcView);
+  el.hidden = !wcView;
+  /* keep the tab's fresh-glow honest whenever new markings arrive */
+  renderTabs();
+  if (!wcView) return;
+  if (!document.getElementById("wc-panel")) {
+    el.innerHTML = `<div id="wc-panel">
         <div class="wcbar" id="wc-tools" hidden></div>
         <div id="wc-frame"><canvas id="wc-canvas"></canvas></div>
         <div class="wcfoot" id="wc-foot"></div>
-      </div></div>`;
+      </div>`;
     const c = wcCanvas();
     c.addEventListener("pointerdown", wcDown);
     c.addEventListener("pointermove", wcMove);
@@ -2678,23 +2671,17 @@ function renderChart(repaint) {
     c.addEventListener("pointercancel", wcUp);
     c.classList.toggle("quill", IS_MASTER);
   }
-  /* players with an unmarked vellum: no chip at all */
-  if (!IS_MASTER && !chart.strokes.length && !(chart.grid && chart.grid.on)) {
-    el.dataset.sig = ""; el.style.display = "none"; return;
-  }
-  el.style.display = "";
-
-  const chip = document.getElementById("wc-chip");
-  const pop = document.getElementById("wc-pop");
   const tools = document.getElementById("wc-tools");
   const foot = document.getElementById("wc-foot");
-  pop.hidden = !wcOpen;
-  document.getElementById("wc-chipname").textContent = IS_MASTER ? "THE CHART" : "the warden's chart";
-  chip.classList.toggle("fresh", !wcOpen && (syncMeta.map || 0) > wcSeen && chart.strokes.length > 0);
+  /* viewing counts as seeing — the glow rests while the Chart is open */
+  if ((syncMeta.map || 0) > wcSeen) {
+    wcSeen = syncMeta.map;
+    localStorage.setItem(WC_SEEN_LS, String(wcSeen));
+  }
 
   const g = chart.grid || {};
   const armed = Date.now() - wcArmClear <= 2600;
-  const sig = JSON.stringify([IS_MASTER, wcOpen, wcColor, wcWidth, wcErase, armed, wcFull, g.on, g.hue, chart.strokes.length > 0]);
+  const sig = JSON.stringify([IS_MASTER, wcView, wcColor, wcWidth, wcErase, armed, wcFull, g.on, g.hue, chart.strokes.length > 0]);
   if (el.dataset.sig !== sig) {
     el.dataset.sig = sig;
     if (IS_MASTER) {
@@ -2717,10 +2704,10 @@ function renderChart(repaint) {
          <span class="mnote">${wcFull ? "the vellum is full — undo or clear" : "thy quill is seen by all at the table"}</span>`
       : `<span class="mnote">the Warden's hand moves the quill — thine eyes behold it</span>`;
   }
-  if (wcOpen && (repaint || !wcInk)) wcResize();
+  if (wcView && (repaint || !wcInk)) wcResize();
 }
 
-window.addEventListener("resize", () => { if (wcOpen) wcResize(); });
+window.addEventListener("resize", () => { if (wcView) wcResize(); });
 
 renderMusic();
 renderChart();
