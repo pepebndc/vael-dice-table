@@ -11,7 +11,7 @@ const SHARED = new Set(["npcs", "music", "map"]);
 const KEYS = ["paco", "ray", "odinson", "npcs", "music", "map"];
 // Chart backgrounds live under their own keys, fetched on demand (never in
 // the poll MGET — they carry a compressed image and would bloat every poll).
-const MAPBG = /^mapbg-c[1-4]$/;
+const MAPBG = /^mapbg-c\d{1,2}$/;
 
 const REST_URL = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
 const REST_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
