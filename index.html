@@ -575,6 +575,7 @@
     border-color: #c89a3c; box-shadow: 0 0 8px rgba(224,154,60,.35);
   }
   #wchart .wtool.danger.armed { background: #5a1a12; color: #ffb4a0; border-color: #a04a30; }
+  #wchart .wtool.glyph { font-size: 19px; min-width: 36px; height: 34px; padding: 0 6px; }
   #wchart .wtool i { border-radius: 50%; background: currentColor; display: block; }
   #wc-frame {
     position: relative; border: 1px solid var(--frost-edge); border-radius: 8px; overflow: hidden;
@@ -1382,7 +1383,7 @@ function renderTabs() {
   const t = document.getElementById("tabs");
   t.innerHTML = Object.keys(CHARS).map(k =>
     `<button class="${k === current && !wcView ? "active" : ""}" style="--tabc:${CHARS[k].color}" onclick="wcView=false;current='${k}';applyTheme();renderTabs();renderSheet();renderInventory();renderLog();displayLast();renderChart()">${CHARS[k].emblem} ${CHARS[k].name}</button>`).join("")
-    + `<button class="${wcView ? "active" : (syncMeta.map || 0) > wcSeen && chart.strokes.length ? "fresh" : ""}" style="--tabc:#4e8f7d" onclick="openChart()" title="the Warden's shared sketches">🗺 The Chart</button>`;
+    + `<button class="${wcView ? "active" : (syncMeta.map || 0) > wcSeen && charts.some(wcHasInk) ? "fresh" : ""}" style="--tabc:#4e8f7d" onclick="openChart()" title="the Warden's shared sketches">🗺 The Chart</button>`;
 }
 function clearLog() { logs[current] = []; saveLogs(); markDirty(current); renderLog(); }
 
@@ -1456,7 +1457,10 @@ async function pushDirty() {
     const bundle = who === "music"
       ? { ...(bardShared || {}), updatedAt: syncMeta.music || Date.now() }
       : who === "map"
-      ? { ...chart, strokes: wcLive ? chart.strokes.concat([wcLive]) : chart.strokes,
+      ? { charts: wcLive || wcDragStk
+            ? charts.map((c) => c !== chart ? c
+                : wcLive ? { ...c, strokes: c.strokes.concat([wcLive]) } : { ...c })
+            : charts,
           updatedAt: syncMeta.map || Date.now() }
       : who === "npcs"
       ? { npcs, updatedAt: syncMeta.npcs || Date.now() }
@@ -1535,12 +1539,10 @@ async function pullState() {
          chart from a second device). Not part of `changed` — no sheet re-render. */
       const rmap = remote.map;
       if (rmap && rmap.updatedAt && (syncMeta.map || 0) < rmap.updatedAt) {
-        chart = {
-          strokes: Array.isArray(rmap.strokes) ? rmap.strokes : [],
-          grid: rmap.grid && typeof rmap.grid === "object" ? rmap.grid : chart.grid,
-        };
+        charts = wcNormalize(rmap);
+        chart = charts[wcSel];
         syncMeta.map = rmap.updatedAt;
-        localStorage.setItem(WC_LS, JSON.stringify(chart));
+        localStorage.setItem(WC_LS, JSON.stringify({ charts }));
         localStorage.setItem("diceTableSyncMeta", JSON.stringify(syncMeta));
         renderChart(true);
       }
@@ -1561,7 +1563,7 @@ async function pullState() {
           if (!remote[who]) { dirtyChars[who] = true; seeding = true; }
         }
         if (IS_MASTER && !remote.npcs && npcs.length) { dirtyChars.npcs = true; seeding = true; }
-        if (IS_MASTER && !remote.map && chart.strokes.length) { dirtyChars.map = true; seeding = true; }
+        if (IS_MASTER && !remote.map && charts.some(wcHasInk)) { dirtyChars.map = true; seeding = true; }
         if (seeding) { clearTimeout(pushTimer); pushTimer = setTimeout(pushDirty, 1200); }
       }
     }
@@ -2454,19 +2456,38 @@ function bardTickUi() { /* cheap 1s tick: only the progress bars and clock move 
    in the same bundle so everyone sees the Warden's chosen weave. ── */
 const WC_LS = "diceTableChart:" + TABLE;
 const WC_SEEN_LS = "diceTableChartSeen:" + TABLE;
+const WC_SEL_LS = "diceTableChartSel:" + TABLE;
 const WC_W = 1000, WC_H = 700;
 const WC_COLORS = ["#22242c", "#b03a2e", "#2e6da4", "#2f7d4f", "#c9962e", "#7d3f98", "#f2ede2", "#c05c20"];
 const WC_WIDTHS = [3, 6, 12];
 const WC_GRID_HUES = { frost: "74,112,150", ash: "60,60,68", ember: "160,100,30" };
 const WC_MAX_BYTES = 92000; /* headroom under api/state's 100KB cap */
+const WC_NAMES = ["CHART Ⅰ", "CHART Ⅱ", "CHART Ⅲ", "CHART Ⅳ"];
+const WC_GLYPHS = ["🛡", "⚔", "🏹", "🧙", "🐺", "🐻", "💀", "👹", "🐉", "🕷", "🧟", "👁", "🚪", "🗝", "💰", "🔥", "⭐", "🏰", "🌲", "⛺", "💧", "☠", "❌", "❓"];
 
-let chart = (() => {
-  try {
-    const c = JSON.parse(localStorage.getItem(WC_LS) || "null");
-    if (c && Array.isArray(c.strokes)) return { strokes: c.strokes, grid: c.grid || { on: false, size: 60, hue: "frost" } };
-  } catch (e) { /* corrupt → fresh vellum */ }
-  return { strokes: [], grid: { on: false, size: 60, hue: "frost" } };
+function wcNormalize(doc) { /* accepts the synced doc, the old single-vellum shape, or garbage */
+  let cs = doc && Array.isArray(doc.charts) ? doc.charts
+    : doc && Array.isArray(doc.strokes) ? [doc] /* pre-multichart bundles */
+    : [];
+  return Array.from({ length: 4 }, (_, i) => {
+    const c = cs[i] || {};
+    return {
+      id: "c" + (i + 1),
+      strokes: Array.isArray(c.strokes) ? c.strokes : [],
+      grid: c.grid && typeof c.grid === "object" ? c.grid : { on: false, size: 60, hue: "frost" },
+      stickers: Array.isArray(c.stickers) ? c.stickers : [],
+      bgv: c.bgv || 0,
+    };
+  });
+}
+
+let charts = (() => {
+  try { return wcNormalize(JSON.parse(localStorage.getItem(WC_LS) || "null")); }
+  catch (e) { return wcNormalize(null); }
 })();
+let wcSel = Math.min(3, Math.max(0, parseInt(localStorage.getItem(WC_SEL_LS) || "0", 10) || 0));
+let chart = charts[wcSel];
+function wcHasInk(c) { return !!(c.strokes.length || c.stickers.length || c.bgv); }
 
 let wcView = false;
 let wcSeen = parseInt(localStorage.getItem(WC_SEEN_LS) || "0", 10) || 0;
@@ -2476,11 +2497,18 @@ let wcFull = false;
 let wcLive = null;  /* the stroke under the quill right now */
 let wcInk = null;   /* offscreen ink layer (strokes only, so the eraser spares the grid) */
 let wcBlitReq = 0;
+let wcStick = false;   /* sticker mode: place/move/resize instead of drawing */
+let wcGlyph = null;    /* the armed glyph, stamped on an empty tap */
+let wcPick = null;     /* the chosen sticker (resize/remove target) */
+let wcDragStk = null;  /* sticker under the moving hand */
+let wcStkMoved = false;
+const wcBgCache = {};  /* chart id → {v, img} — scenes fetched once, not per poll */
 
 function wcCanvas() { return document.getElementById("wc-canvas"); }
 function wcScale() { const c = wcCanvas(); return c ? c.width / WC_W : 1; }
 
-function wcSave() { localStorage.setItem(WC_LS, JSON.stringify(chart)); }
+function wcSave() { localStorage.setItem(WC_LS, JSON.stringify({ charts })); }
+function wcBytes() { return JSON.stringify(charts).length; }
 function wcCommit() {
   wcSave();
   markDirty("map");
@@ -2539,6 +2567,9 @@ function wcBlit() {
   /* the vellum */
   ctx.fillStyle = "#e6edf4";
   ctx.fillRect(0, 0, c.width, c.height);
+  /* the scene (uploaded background) */
+  const bg = wcEnsureBg();
+  if (bg) ctx.drawImage(bg, 0, 0, c.width, c.height);
   /* the weave */
   const g = chart.grid || {};
   if (g.on) {
@@ -2555,6 +2586,40 @@ function wcBlit() {
     }
   }
   if (wcInk) ctx.drawImage(wcInk, 0, 0);
+  /* the pieces (stickers), atop everything */
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  for (const st of chart.stickers) {
+    ctx.font = Math.round((st.s || 64) * k) + 'px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",serif';
+    ctx.fillText(st.g, st.x * k, st.y * k);
+  }
+  if (wcStick && wcPick && chart.stickers.includes(wcPick)) {
+    const r = Math.max(24, (wcPick.s || 64) * 0.62) * k;
+    ctx.strokeStyle = "rgba(200,154,60,.9)";
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 5]);
+    ctx.beginPath(); ctx.arc(wcPick.x * k, wcPick.y * k, r, 0, Math.PI * 2); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+}
+
+function wcEnsureBg() { /* returns the scene image if ready; fetches it once when versions drift */
+  const c = chart;
+  if (!c.bgv) return null;
+  const cached = wcBgCache[c.id];
+  if (cached && cached.v === c.bgv) return cached.img || null;
+  if (cached && cached.want === c.bgv) return cached.img || null; /* fetch already in flight */
+  wcBgCache[c.id] = { ...(cached || {}), want: c.bgv };
+  fetch(`/api/state?table=${TABLE}&bg=mapbg-${c.id}`)
+    .then((r) => r.json())
+    .then((j) => {
+      if (!j || !j.data) return;
+      const img = new Image();
+      img.onload = () => { wcBgCache[c.id] = { v: c.bgv, img }; if (chart === c) wcBlit(); };
+      img.src = j.data;
+    })
+    .catch(() => { delete wcBgCache[c.id]; /* retry on a later blit */ });
+  return cached ? cached.img || null : null;
 }
 
 function wcRequestBlit() { /* coalesce mid-drag repaints into one per frame */
@@ -2585,13 +2650,36 @@ function wcPoint(e) {
   return [x, y];
 }
 
+function wcHitSticker(x, y) { /* topmost first */
+  for (let i = chart.stickers.length - 1; i >= 0; i--) {
+    const st = chart.stickers[i];
+    const r = Math.max(26, (st.s || 64) * 0.55);
+    if (Math.abs(x - st.x) <= r && Math.abs(y - st.y) <= r) return st;
+  }
+  return null;
+}
+
 function wcDown(e) {
   if (!IS_MASTER || e.button > 0) return;
-  if (wcFull && !wcErase) { renderChart(); return; }
   e.preventDefault();
   if (!wcInk) wcResize();
   wcCanvas().setPointerCapture(e.pointerId);
   const [x, y] = wcPoint(e);
+  if (wcStick) { /* the sticker hand: grab, or stamp the armed glyph */
+    const hit = wcHitSticker(x, y);
+    if (hit) {
+      wcPick = hit; wcDragStk = hit; wcStkMoved = false;
+    } else if (wcGlyph && wcBytes() + 60 < WC_MAX_BYTES) {
+      const st = { g: wcGlyph, x, y, s: 64 };
+      chart.stickers.push(st);
+      wcPick = st; wcDragStk = st; wcStkMoved = true;
+    } else {
+      wcPick = null;
+    }
+    wcRequestBlit(); renderChart();
+    return;
+  }
+  if (wcFull && !wcErase) { renderChart(); return; }
   wcLive = wcErase ? { e: 1, w: 26, p: [x, y] } : { c: wcColor, w: wcWidth, p: [x, y] };
   const ctx = wcInk.getContext("2d");
   wcDrawStroke(ctx, wcLive, wcScale());
@@ -2599,6 +2687,15 @@ function wcDown(e) {
 }
 
 function wcMove(e) {
+  if (wcDragStk) {
+    e.preventDefault();
+    const [x, y] = wcPoint(e);
+    if (wcDragStk.x !== x || wcDragStk.y !== y) {
+      wcDragStk.x = x; wcDragStk.y = y; wcStkMoved = true;
+      wcRequestBlit(); wcBeam();
+    }
+    return;
+  }
   if (!wcLive) return;
   e.preventDefault();
   const [x, y] = wcPoint(e);
@@ -2620,10 +2717,16 @@ function wcMove(e) {
 }
 
 function wcUp() {
+  if (wcDragStk) {
+    wcDragStk = null;
+    if (wcStkMoved) wcCommit();
+    renderChart();
+    return;
+  }
   if (!wcLive) return;
   const s = wcLive;
   wcLive = null;
-  const grown = JSON.stringify(chart.strokes).length + JSON.stringify(s).length;
+  const grown = wcBytes() + JSON.stringify(s).length;
   /* soft cap blocks new ink; hard cap (the API's 100KB) blocks even erasing */
   if (grown > 97000 || (grown > WC_MAX_BYTES && !s.e)) {
     wcFull = true;
@@ -2643,7 +2746,7 @@ function wcToggleErase() { wcErase = !wcErase; renderChart(); }
 function wcUndo() {
   if (!chart.strokes.length) return;
   chart.strokes.pop();
-  wcFull = JSON.stringify(chart.strokes).length > WC_MAX_BYTES;
+  wcFull = wcBytes() > WC_MAX_BYTES;
   wcCommit(); wcRepaintInk(); wcBlit(); renderChart();
 }
 function wcClear() {
@@ -2655,12 +2758,86 @@ function wcClear() {
   }
   wcArmClear = 0;
   chart.strokes = [];
-  wcFull = false;
+  chart.stickers = [];
+  wcPick = null;
+  wcFull = wcBytes() > WC_MAX_BYTES;
   wcCommit(); wcRepaintInk(); wcBlit(); renderChart();
 }
 function wcGridToggle() { chart.grid.on = !chart.grid.on; wcCommit(); wcBlit(); renderChart(); }
 function wcGridSize(v) { chart.grid.size = parseInt(v, 10) || 60; wcCommit(); wcBlit(); }
 function wcGridHue(h) { chart.grid.hue = h; wcCommit(); wcBlit(); renderChart(); }
+
+/* ── stickers ── */
+function wcStickToggle() { wcStick = !wcStick; if (!wcStick) { wcPick = null; wcGlyph = null; } wcErase = false; wcBlit(); renderChart(); }
+function wcArmGlyph(i) { const g = WC_GLYPHS[i]; wcGlyph = wcGlyph === g ? null : g; renderChart(); }
+function wcStkSize(v) { if (wcPick) { wcPick.s = Math.max(24, Math.min(220, parseInt(v, 10) || 64)); wcRequestBlit(); wcBeam(); } }
+function wcStkSized() { if (wcPick) wcCommit(); }
+function wcStkDel() {
+  const i = chart.stickers.indexOf(wcPick);
+  if (i >= 0) chart.stickers.splice(i, 1);
+  wcPick = null;
+  wcFull = wcBytes() > WC_MAX_BYTES;
+  wcCommit(); wcBlit(); renderChart();
+}
+
+/* ── parallel charts ── */
+function wcSwitch(i) {
+  wcSel = Math.min(3, Math.max(0, i));
+  localStorage.setItem(WC_SEL_LS, String(wcSel));
+  chart = charts[wcSel];
+  wcPick = null; wcDragStk = null; wcLive = null;
+  renderChart(true);
+}
+
+/* ── the scene: an uploaded background, stored under its own key ── */
+function wcUploadBg() { const f = document.getElementById("wc-bgfile"); if (f) f.click(); }
+async function wcBgChosen(input) {
+  const f = input.files && input.files[0];
+  input.value = "";
+  if (!f || !IS_MASTER) return;
+  const target = chart; /* the chart the Warden was on when choosing */
+  let img;
+  try {
+    img = await new Promise((res, rej) => {
+      const i = new Image();
+      i.onload = () => res(i); i.onerror = rej;
+      i.src = URL.createObjectURL(f);
+    });
+  } catch (e) { return; }
+  /* cover-fit onto the vellum's aspect, compressed until it ships light */
+  const cv = document.createElement("canvas");
+  cv.width = 1200; cv.height = Math.round(1200 * (WC_H / WC_W));
+  const cx = cv.getContext("2d");
+  const k = Math.max(cv.width / img.width, cv.height / img.height);
+  cx.drawImage(img, (cv.width - img.width * k) / 2, (cv.height - img.height * k) / 2, img.width * k, img.height * k);
+  URL.revokeObjectURL(img.src);
+  let q = 0.72, data = cv.toDataURL("image/jpeg", q);
+  while (data.length > 330000 && q > 0.25) { q -= 0.12; data = cv.toDataURL("image/jpeg", q); }
+  try {
+    const r = await fetch(`/api/state?table=${TABLE}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ who: "mapbg-" + target.id, bundle: { data, updatedAt: Date.now() } }),
+    });
+    if (!r.ok) throw new Error("upload refused");
+    target.bgv = Date.now();
+    const shown = new Image();
+    shown.onload = () => { wcBgCache[target.id] = { v: target.bgv, img: shown }; if (chart === target) wcBlit(); };
+    shown.src = data;
+    wcCommit(); renderChart();
+  } catch (e) {
+    alertNote("the scene would not take — try a smaller image");
+  }
+}
+function wcBgRemove() {
+  chart.bgv = 0;
+  delete wcBgCache[chart.id];
+  wcCommit(); wcBlit(); renderChart();
+}
+function alertNote(msg) { /* quiet footer note, no blocking dialogs */
+  const n = document.querySelector("#wc-foot .mnote");
+  if (n) n.textContent = msg;
+}
 
 function openChart() {
   wcView = true;
@@ -2681,9 +2858,12 @@ function renderChart(repaint) {
   if (!wcView) return;
   if (!document.getElementById("wc-panel")) {
     el.innerHTML = `<div id="wc-panel">
+        <div class="wcbar" id="wc-charts"></div>
         <div class="wcbar" id="wc-tools" hidden></div>
+        <div class="wcbar" id="wc-glyphs" hidden></div>
         <div id="wc-frame"><canvas id="wc-canvas"></canvas></div>
         <div class="wcfoot" id="wc-foot"></div>
+        <input type="file" id="wc-bgfile" accept="image/*" hidden onchange="wcBgChosen(this)">
       </div>`;
     const c = wcCanvas();
     c.addEventListener("pointerdown", wcDown);
@@ -2692,7 +2872,9 @@ function renderChart(repaint) {
     c.addEventListener("pointercancel", wcUp);
     c.classList.toggle("quill", IS_MASTER);
   }
+  const chartsBar = document.getElementById("wc-charts");
   const tools = document.getElementById("wc-tools");
+  const glyphs = document.getElementById("wc-glyphs");
   const foot = document.getElementById("wc-foot");
   /* viewing counts as seeing — the glow rests while the Chart is open */
   if ((syncMeta.map || 0) > wcSeen) {
@@ -2702,28 +2884,46 @@ function renderChart(repaint) {
 
   const g = chart.grid || {};
   const armed = Date.now() - wcArmClear <= 2600;
-  const sig = JSON.stringify([IS_MASTER, wcView, wcColor, wcWidth, wcErase, armed, wcFull, g.on, g.hue, chart.strokes.length > 0]);
+  const pickOn = wcStick && wcPick && chart.stickers.includes(wcPick);
+  const sig = JSON.stringify([IS_MASTER, wcView, wcSel, wcColor, wcWidth, wcErase, armed, wcFull,
+    g.on, g.hue, chart.bgv, wcStick, wcGlyph, pickOn && wcPick.s, charts.map(wcHasInk)]);
   if (el.dataset.sig !== sig) {
     el.dataset.sig = sig;
+    chartsBar.innerHTML = charts.map((c, i) =>
+      `<button class="wtool${i === wcSel ? " on" : ""}" onclick="wcSwitch(${i})" title="${wcHasInk(c) ? "bears markings" : "blank vellum"}">${WC_NAMES[i]}${wcHasInk(c) ? " ·" : ""}</button>`).join("")
+      + `<span class="mnote" style="flex:1;text-align:right">four vellums, side by side</span>`;
     if (IS_MASTER) {
       tools.hidden = false;
       tools.innerHTML = WC_COLORS.map((c, i) =>
-        `<button class="swatch${!wcErase && wcColor === c ? " on" : ""}" style="background:${c}" onclick="wcSetColor(${i})" title="ink"></button>`).join("")
+        `<button class="swatch${!wcStick && !wcErase && wcColor === c ? " on" : ""}" style="background:${c}" onclick="wcSetColor(${i})" title="ink"></button>`).join("")
         + `<span style="width:6px"></span>`
         + WC_WIDTHS.map((w, i) =>
-          `<button class="wtool${!wcErase && wcWidth === w ? " on" : ""}" onclick="wcSetWidth(${i})" title="quill weight"><i style="width:${4 + i * 4}px;height:${4 + i * 4}px"></i></button>`).join("")
+          `<button class="wtool${!wcStick && !wcErase && wcWidth === w ? " on" : ""}" onclick="wcSetWidth(${i})" title="quill weight"><i style="width:${4 + i * 4}px;height:${4 + i * 4}px"></i></button>`).join("")
         + `<button class="wtool${wcErase ? " on" : ""}" onclick="wcToggleErase()" title="scrape the vellum">⌫ ERASE</button>
+           <button class="wtool${wcStick ? " on" : ""}" onclick="wcStickToggle()" title="place and move pieces">♟ PIECES</button>
            <span class="gap"></span>
            <button class="wtool" onclick="wcUndo()" title="undo the last stroke">↩</button>
-           <button class="wtool danger${armed ? " armed" : ""}" onclick="wcClear()" title="burn the whole chart">${armed ? "SURE?" : "✕ CLEAR"}</button>`;
+           <button class="wtool danger${armed ? " armed" : ""}" onclick="wcClear()" title="burn this chart's ink and pieces">${armed ? "SURE?" : "✕ CLEAR"}</button>`;
+      glyphs.hidden = !wcStick;
+      glyphs.innerHTML = wcStick
+        ? WC_GLYPHS.map((gl, i) =>
+            `<button class="wtool glyph${wcGlyph === gl ? " on" : ""}" onclick="wcArmGlyph(${i})" title="arm, then tap the chart to place">${gl}</button>`).join("")
+        : "";
     }
-    foot.innerHTML = IS_MASTER
-      ? `<button class="wtool${g.on ? " on" : ""}" onclick="wcGridToggle()">▦ GRID</button>
+    foot.innerHTML = !IS_MASTER
+      ? `<span class="mnote">the Warden's hand moves the quill — thine eyes behold it</span>`
+      : pickOn
+      ? `<span class="mnote" style="flex:none;text-align:left">chosen piece: ${wcPick.g}</span>
+         <input type="range" min="24" max="220" step="4" value="${wcPick.s || 64}" oninput="wcStkSize(this.value)" onchange="wcStkSized()" title="piece size">
+         <button class="wtool danger" onclick="wcStkDel()">🗑 REMOVE</button>
+         <span class="mnote">drag to move · slide to grow</span>`
+      : `<button class="wtool${g.on ? " on" : ""}" onclick="wcGridToggle()">▦ GRID</button>
          <input type="range" min="25" max="150" step="5" value="${g.size || 60}" oninput="wcGridSize(this.value)" title="grid cell size" ${g.on ? "" : "disabled"}>
          ${Object.entries(WC_GRID_HUES).map(([h, rgb]) =>
            `<button class="swatch${g.hue === h ? " on" : ""}" style="background:rgb(${rgb})" onclick="wcGridHue('${h}')" title="grid shade"></button>`).join("")}
-         <span class="mnote">${wcFull ? "the vellum is full — undo or clear" : "thy quill is seen by all at the table"}</span>`
-      : `<span class="mnote">the Warden's hand moves the quill — thine eyes behold it</span>`;
+         <button class="wtool" onclick="wcUploadBg()" title="lay an image beneath the ink">🖼 SCENE</button>
+         ${chart.bgv ? `<button class="wtool" onclick="wcBgRemove()" title="lift the scene away">✕</button>` : ""}
+         <span class="mnote">${wcFull ? "the vellum is full — undo or clear" : "thy quill is seen by all at the table"}</span>`;
   }
   if (wcView && (repaint || !wcInk)) wcResize();
 }

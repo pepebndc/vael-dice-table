@@ -9,6 +9,9 @@ const CHARS = new Set(["paco", "ray", "odinson"]);
 const SHARED = new Set(["npcs", "music", "map"]);
 // Every key this table can hold — a fixed set, so reads are a single MGET.
 const KEYS = ["paco", "ray", "odinson", "npcs", "music", "map"];
+// Chart backgrounds live under their own keys, fetched on demand (never in
+// the poll MGET — they carry a compressed image and would bloat every poll).
+const MAPBG = /^mapbg-c[1-4]$/;
 
 const REST_URL = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
 const REST_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
@@ -40,6 +43,13 @@ export default async function handler(req, res) {
 
   try {
     if (req.method === "GET") {
+      const bg = req.query.bg;
+      if (bg) {
+        if (!MAPBG.test(String(bg))) return res.status(400).json({ error: "bad key" });
+        const v = await redis(["GET", prefix + bg]);
+        res.setHeader("Cache-Control", "private, max-age=31536000"); /* content is versioned by bgv */
+        return res.status(200).json(v ? JSON.parse(v) : {});
+      }
       const vals = await redis(["MGET", ...KEYS.map((k) => prefix + k)]);
       const out = {};
       KEYS.forEach((key, i) => {
@@ -52,11 +62,12 @@ export default async function handler(req, res) {
 
     if (req.method === "PUT") {
       const { who, bundle } = req.body || {};
-      if ((!CHARS.has(who) && !SHARED.has(who)) || !bundle || typeof bundle !== "object") {
+      const isBg = typeof who === "string" && MAPBG.test(who);
+      if ((!CHARS.has(who) && !SHARED.has(who) && !isBg) || !bundle || typeof bundle !== "object") {
         return res.status(400).json({ error: "bad payload" });
       }
       const body = JSON.stringify(bundle);
-      if (body.length > 100000) {
+      if (body.length > (isBg ? 450000 : 100000)) {
         return res.status(413).json({ error: "too large" });
       }
       await redis(["SET", prefix + who, body]);
