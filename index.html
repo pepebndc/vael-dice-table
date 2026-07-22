@@ -1456,7 +1456,8 @@ async function pushDirty() {
     const bundle = who === "music"
       ? { ...(bardShared || {}), updatedAt: syncMeta.music || Date.now() }
       : who === "map"
-      ? { ...chart, updatedAt: syncMeta.map || Date.now() }
+      ? { ...chart, strokes: wcLive ? chart.strokes.concat([wcLive]) : chart.strokes,
+          updatedAt: syncMeta.map || Date.now() }
       : who === "npcs"
       ? { npcs, updatedAt: syncMeta.npcs || Date.now() }
       : {
@@ -1569,10 +1570,11 @@ async function pullState() {
   return changed;
 }
 
-/* self-scheduling poll loop at a fixed cadence; stops while the tab is hidden */
+/* self-scheduling poll loop; stops while the tab is hidden. While the Chart
+   is unfurled the cadence quickens so the Warden's quill is nearly live. */
 function scheduleNextPoll() {
   clearTimeout(pollTimer);
-  pollTimer = setTimeout(pollTick, POLL_MS);
+  pollTimer = setTimeout(pollTick, wcView ? 1500 : POLL_MS);
 }
 async function pollTick() {
   clearTimeout(pollTimer);
@@ -2482,9 +2484,25 @@ function wcSave() { localStorage.setItem(WC_LS, JSON.stringify(chart)); }
 function wcCommit() {
   wcSave();
   markDirty("map");
+  /* chart edits skip the coalescing delay — the table is watching live */
+  clearTimeout(pushTimer);
+  if (SYNC_ON && syncEnabled) pushDirty();
   /* one's own strokes are never "fresh news" */
   wcSeen = syncMeta.map || Date.now();
   localStorage.setItem(WC_SEEN_LS, String(wcSeen));
+}
+let wcLastBeam = 0;
+function wcBeam() { /* mid-stroke: push the half-drawn line about once a second */
+  if (!SYNC_ON || !syncEnabled) return;
+  const now = Date.now();
+  if (now - wcLastBeam < 1000) return;
+  wcLastBeam = now;
+  syncMeta.map = now;
+  localStorage.setItem("diceTableSyncMeta", JSON.stringify(syncMeta));
+  wcSeen = now;
+  localStorage.setItem(WC_SEEN_LS, String(wcSeen));
+  dirtyChars.map = true;
+  pushDirty();
 }
 
 function wcDrawStroke(ctx, s, k) {
@@ -2598,6 +2616,7 @@ function wcMove(e) {
   ctx.lineCap = "round";
   ctx.beginPath(); ctx.moveTo(lx * k, ly * k); ctx.lineTo(x * k, y * k); ctx.stroke();
   wcRequestBlit();
+  wcBeam();
 }
 
 function wcUp() {
@@ -2609,6 +2628,7 @@ function wcUp() {
   if (grown > 97000 || (grown > WC_MAX_BYTES && !s.e)) {
     wcFull = true;
     wcRepaintInk(); wcBlit(); /* the refused stroke fades away */
+    wcCommit(); /* retract any half-stroke already beamed to the table */
   } else {
     chart.strokes.push(s);
     wcFull = grown > WC_MAX_BYTES;
@@ -2648,6 +2668,7 @@ function openChart() {
   localStorage.setItem(WC_SEEN_LS, String(wcSeen));
   renderTabs();
   renderChart(true);
+  wakePolling(); /* switch to the quickened cadence right away */
 }
 
 function renderChart(repaint) {
