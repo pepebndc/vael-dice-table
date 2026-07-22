@@ -1455,7 +1455,12 @@ function toggleSync() {
   }
 }
 
+let pushing = false, pushAgain = false;
 async function pushDirty() {
+  /* one push at a time — concurrent PUTs can land out of order and let an
+     older bundle overwrite a newer one (e.g. rapid chart edits) */
+  if (pushing) { pushAgain = true; return; }
+  pushing = true;
   const whos = Object.keys(dirtyChars);
   dirtyChars = {};
   for (const who of whos) {
@@ -1492,6 +1497,8 @@ async function pushDirty() {
       dirtyChars[who] = true; /* retry on the next push */
     }
   }
+  pushing = false;
+  if (pushAgain) { pushAgain = false; pushDirty(); }
 }
 
 function mergeLogs(localL, remoteL) {
