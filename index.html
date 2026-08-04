@@ -740,6 +740,7 @@ const IS_MASTER = new URLSearchParams(location.search).has("master");
 const MAX_NPCS = 5;
 const MAX_ITEMS = 30;
 const ENEMY_RED = "#a33636"; /* foes from the bestiary roll a blood-red die */
+const HANDFUL_GREY = "#8195a8"; /* loose handfuls carry no hero's colors */
 const state = JSON.parse(localStorage.getItem("diceTableState") || "{}");
 for (const k in CHARS) {
   if (!state[k]) state[k] = { hp: CHARS[k].hpMax, rageUsed: 0 };
@@ -874,6 +875,7 @@ function show(label, total, detail, extra, crit, sides, multi, bonus, dieValue, 
   sides = sides || 20;
   const entry = { id: Date.now() + Math.random(), t: total, w: label, d: detail + (extra ? " · " + extra.replace(/<[^>]*>/g, "") : "") };
   if (dieColor === ENEMY_RED) entry.npc = 1; /* a foe's throw — the ledger inks it in blood */
+  else if (/^Handful ·/.test(label)) entry.hand = 1; /* a loose handful — the ledger inks it in grey */
   lastRolls[who] = { label, total, detail, extra: extra || "", crit: crit || null, sides,
     bonus: bonus || null, dieValue: dieValue != null ? dieValue : null, dieColor: dieColor || null };
   saveLast();
@@ -991,8 +993,10 @@ function renderLog() {
   document.getElementById("logmode").textContent = logAll ? "🪶 " + CHARS[current].name + "'s page" : "📜 the whole table";
   const el = document.getElementById("log");
   if (!logAll) {
-    el.innerHTML = logs[current].map(e =>
-      `<div class="logentry"><span class="tot"${e.npc ? ` style="color:${ENEMY_RED}"` : ""}>${e.t}</span><span class="who"${e.npc ? ` style="color:${ENEMY_RED}"` : ""}>${e.npc ? "⚔ " : ""}${e.w}</span><div class="det">${e.d}</div></div>`).join("");
+    el.innerHTML = logs[current].map(e => {
+      const tint = e.npc ? ENEMY_RED : e.hand ? HANDFUL_GREY : null;
+      return `<div class="logentry"><span class="tot"${tint ? ` style="color:${tint}"` : ""}>${e.t}</span><span class="who"${tint ? ` style="color:${tint}"` : ""}>${e.npc ? "⚔ " : ""}${e.w}</span><div class="det">${e.d}</div></div>`;
+    }).join("");
     return;
   }
   const all = [];
@@ -1001,7 +1005,7 @@ function renderLog() {
   const when = (id) => id >= 1e12 ? new Date(id).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
   el.innerHTML = all.length
     ? all.slice(0, 150).map(({ e, k }) => {
-        const color = e.npc ? ENEMY_RED : CHARS[k].color;
+        const color = e.npc ? ENEMY_RED : e.hand ? HANDFUL_GREY : CHARS[k].color;
         const name = e.npc ? `⚔ ${escapeHtml(String(e.w))}` : `${CHARS[k].emblem} ${CHARS[k].name}`;
         return `<div class="fjentry" style="--fjc:${color}">
           <span class="tot">${e.t}</span><span class="name">${name}</span>
