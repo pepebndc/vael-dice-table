@@ -1009,7 +1009,7 @@ function renderLog() {
   const owner = document.getElementById("logowner");
   owner.textContent = CHARS[current].name + "'s Journal";
   document.getElementById("log").innerHTML = logs[current].map(e =>
-    `<div class="logentry"><span class="tot">${e.t}</span><span class="who">${e.w}</span><div class="det">${e.d}</div></div>`).join("");
+    `<div class="logentry"><span class="tot"${e.npc ? ` style="color:${ENEMY_RED}"` : ""}>${e.t}</span><span class="who"${e.npc ? ` style="color:${ENEMY_RED}"` : ""}>${e.npc ? "⚔ " : ""}${e.w}</span><div class="det">${e.d}</div></div>`).join("");
   renderFullLog();
 }
 
@@ -1032,11 +1032,11 @@ function renderFullLog() {
   el.innerHTML = all.length
     ? all.slice(0, 150).map(({ e, k }) => {
         const color = e.npc ? ENEMY_RED : CHARS[k].color;
-        const name = e.npc ? "⚔ foe" : `${CHARS[k].emblem} ${CHARS[k].name}`;
+        const name = e.npc ? `⚔ ${escapeHtml(String(e.w))}` : `${CHARS[k].emblem} ${CHARS[k].name}`;
         return `<div class="fjentry" style="--fjc:${color}">
           <span class="tot">${e.t}</span><span class="name">${name}</span>
           <span class="when">${when(e.id)}</span>
-          <div class="deed">${escapeHtml(String(e.w))}</div><div class="det">${e.d}</div>
+          ${e.npc ? "" : `<div class="deed">${escapeHtml(String(e.w))}</div>`}<div class="det">${e.d}</div>
         </div>`;
       }).join("")
     : `<div class="det" style="padding:14px 4px;font-style:italic;color:var(--ink-soft)">no dice have tumbled yet — the ledger waits</div>`;
