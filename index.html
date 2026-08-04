@@ -455,6 +455,41 @@
     float: right; font-family: "IM Fell English", serif; font-style: italic; font-size: 12px;
     background: none; border: 1px solid #9cbeda; color: var(--ink-soft); border-radius: 5px; padding: 3px 10px; cursor: pointer;
   }
+  /* ── the Table's Journal: every die at the table, one ledger, hung off the right edge ── */
+  #fj {
+    position: fixed; top: 0; right: 0; bottom: 0; width: min(340px, 86vw); z-index: 55;
+    background:
+      radial-gradient(ellipse 90% 30% at 50% 0%, rgba(255,255,255,.8), transparent 70%),
+      linear-gradient(160deg, var(--frost) 0%, var(--frost2) 70%, #bdd5ea 100%);
+    border-left: 1px solid var(--frost-edge);
+    box-shadow: -8px 0 26px rgba(4,12,24,.35);
+    transform: translateX(100%); transition: transform .28s ease;
+    display: flex; flex-direction: column;
+  }
+  #fj.open { transform: translateX(0); }
+  #fj .fjtab {
+    position: absolute; left: -36px; top: 50%; transform: translateY(-50%);
+    width: 36px; padding: 16px 0; writing-mode: vertical-rl; text-orientation: mixed;
+    font-family: "Cinzel", serif; font-weight: 700; font-size: 12px; letter-spacing: 2.5px;
+    color: var(--ink); cursor: pointer;
+    background: linear-gradient(160deg, var(--frost), var(--frost2));
+    border: 1px solid var(--frost-edge); border-right: none; border-radius: 8px 0 0 8px;
+    box-shadow: -4px 0 12px rgba(4,12,24,.28);
+  }
+  #fj .fjhead { padding: 14px 16px 10px; border-bottom: 1px dashed var(--frost-edge); }
+  #fj .fjhead b { font-family: "Cinzel", serif; font-size: 15px; letter-spacing: 1px; color: var(--ink); }
+  #fj .fjhead .mnote { display: block; font-style: italic; color: var(--ink-soft); font-size: 12px; }
+  #fj-list { flex: 1; overflow-y: auto; padding: 4px 14px 20px; }
+  .fjentry {
+    border-bottom: 1px dashed rgba(125,165,200,.5); border-left: 3px solid var(--fjc, var(--ink-soft));
+    padding: 7px 2px 7px 9px; margin: 2px 0; font-size: 13.5px;
+  }
+  .fjentry .tot { float: right; font-family: "Cinzel", serif; font-weight: 900; font-size: 18px; color: var(--ink); margin-left: 8px; }
+  .fjentry .name { font-family: "Cinzel", serif; font-weight: 700; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; color: var(--fjc, var(--ink)); }
+  .fjentry .when { float: right; clear: right; font-size: 10.5px; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+  .fjentry .deed { font-style: italic; color: #2c5578; font-weight: 700; }
+  .fjentry .det { color: var(--ink-soft); font-size: 12.5px; font-style: italic; }
+
   footer { position: relative; z-index: 3; text-align: center; margin-top: 26px; color: #7d9fc0; font-style: italic; font-size: 13px; text-shadow: 0 1px 3px rgba(0,0,0,.6); }
 
   /* ── Sync toggle ──────────────────────── */
@@ -658,6 +693,12 @@
 </div>
 
 <footer>❄ compiled from Guild Archive ref. PA-7731 · the Hearthstone Inn keeps the fire lit ❄</footer>
+
+<aside id="fj">
+  <button class="fjtab" onclick="fjToggle()" title="the whole table's throws, in one ledger">📜 JOURNAL</button>
+  <div class="fjhead"><b>THE TABLE'S JOURNAL</b><span class="mnote">every die, one ledger · hero and foe by their colors</span></div>
+  <div id="fj-list"></div>
+</aside>
 </div>
 
 <script>
@@ -857,6 +898,7 @@ function show(label, total, detail, extra, crit, sides, multi, bonus, dieValue, 
   const who = current;
   sides = sides || 20;
   const entry = { id: Date.now() + Math.random(), t: total, w: label, d: detail + (extra ? " · " + extra.replace(/<[^>]*>/g, "") : "") };
+  if (dieColor === ENEMY_RED) entry.npc = 1; /* a foe's throw — the ledger inks it in blood */
   lastRolls[who] = { label, total, detail, extra: extra || "", crit: crit || null, sides,
     bonus: bonus || null, dieValue: dieValue != null ? dieValue : null, dieColor: dieColor || null };
   saveLast();
@@ -898,6 +940,8 @@ function commitEntry(who, entry) {
     renderLog();
     const first = document.querySelector("#log .logentry");
     if (first) first.classList.add("new");
+  } else {
+    renderFullLog(); /* the ledger hears every die, whoever's page is open */
   }
 }
 
@@ -966,6 +1010,36 @@ function renderLog() {
   owner.textContent = CHARS[current].name + "'s Journal";
   document.getElementById("log").innerHTML = logs[current].map(e =>
     `<div class="logentry"><span class="tot">${e.t}</span><span class="who">${e.w}</span><div class="det">${e.d}</div></div>`).join("");
+  renderFullLog();
+}
+
+/* ── the Table's Journal: every character's throws in one ledger, off the right edge ── */
+let fjOn = localStorage.getItem("diceTableFJ") === "1";
+function fjToggle() {
+  fjOn = !fjOn;
+  localStorage.setItem("diceTableFJ", fjOn ? "1" : "0");
+  document.getElementById("fj").classList.toggle("open", fjOn);
+  if (fjOn) renderFullLog();
+}
+function renderFullLog() {
+  if (!fjOn) return;
+  const el = document.getElementById("fj-list");
+  if (!el) return;
+  const all = [];
+  for (const k in CHARS) for (const e of logs[k] || []) all.push({ e, k });
+  all.sort((a, b) => (b.e.id || 0) - (a.e.id || 0));
+  const when = (id) => id >= 1e12 ? new Date(id).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+  el.innerHTML = all.length
+    ? all.slice(0, 150).map(({ e, k }) => {
+        const color = e.npc ? ENEMY_RED : CHARS[k].color;
+        const name = e.npc ? "⚔ foe" : `${CHARS[k].emblem} ${CHARS[k].name}`;
+        return `<div class="fjentry" style="--fjc:${color}">
+          <span class="tot">${e.t}</span><span class="name">${name}</span>
+          <span class="when">${when(e.id)}</span>
+          <div class="deed">${escapeHtml(String(e.w))}</div><div class="det">${e.d}</div>
+        </div>`;
+      }).join("")
+    : `<div class="det" style="padding:14px 4px;font-style:italic;color:var(--ink-soft)">no dice have tumbled yet — the ledger waits</div>`;
 }
 
 function attack(charKey, i) {
@@ -2476,7 +2550,15 @@ const WC_WIDTHS = [3, 6, 12];
 const WC_GRID_HUES = { frost: "74,112,150", ash: "60,60,68", ember: "160,100,30" };
 const WC_MAX_BYTES = 92000; /* headroom under api/state's 100KB cap */
 const WC_MAX_CHARTS = 8;
-const WC_GLYPHS = ["🛡", "⚔", "🏹", "🧙", "🐺", "🐻", "💀", "👹", "🐉", "🕷", "🧟", "👁", "🚪", "🗝", "💰", "🔥", "⭐", "🏰", "🌲", "⛺", "💧", "☠", "❌", "❓"];
+const WC_GLYPHS = [
+  /* the heroes themselves — drawn as banner-colored tokens, not plain glyphs */
+  ...Object.keys(CHARS).map((k) => "@" + k),
+  /* the party & their arms */ "🛡", "⚔", "🏹", "🧙", "🗡", "🪓", "🔮", "🎻", "🐎", "🛶",
+  /* foes & beasts */ "🐺", "🐻", "💀", "👹", "🐉", "🕷", "🧟", "👁", "🦇", "🐍", "🐀", "🦂", "👻", "🧌", "🦅", "🐙",
+  /* places & terrain */ "🚪", "🏰", "🌲", "⛺", "💧", "🔥", "🌉", "⛰", "🕳", "⚰", "🌊", "🍄",
+  /* loot & trappings */ "🗝", "💰", "💎", "📜", "🧪", "🕯", "🪤", "⚓",
+  /* the Warden's marks */ "⭐", "☠", "❌", "❓", "⚠", "🩸", "💤", "🚩",
+];
 
 function wcNormalize(doc) { /* accepts the synced doc, older shapes, or garbage; always ≥1 chart */
   let cs = doc && Array.isArray(doc.charts) ? doc.charts
@@ -2515,6 +2597,7 @@ let wcInk = null;   /* offscreen ink layer (strokes only, so the eraser spares t
 let wcBlitReq = 0;
 let wcStick = false;   /* sticker mode: place/move/resize instead of drawing */
 let wcGlyph = null;    /* the armed glyph, stamped on an empty tap */
+let wcText = "";       /* the armed label — stamped when no glyph is armed */
 let wcPick = null;     /* the chosen sticker (resize/remove target) */
 let wcDragStk = null;  /* sticker under the moving hand */
 let wcResizing = null; /* sticker whose corner square is being dragged */
@@ -2608,8 +2691,13 @@ function wcBlit() {
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   for (const st of chart.stickers) {
-    ctx.font = Math.round((st.s || 64) * k) + 'px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",serif';
+    if (st.t) { wcDrawLabel(ctx, st, k); continue; }
+    const hero = st.g[0] === "@" && CHARS[st.g.slice(1)];
+    if (hero) { wcDrawHero(ctx, st, hero, k); continue; }
+    const s = (st.s || 64) * k;
+    ctx.font = Math.round(s) + 'px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",serif';
     ctx.fillText(st.g, st.x * k, st.y * k);
+    if (st.n) wcDrawCaption(ctx, st.n, st.x * k, st.y * k + (st.up ? -1 : 1) * s * 0.62, s);
   }
   if (wcStick && wcPick && chart.stickers.includes(wcPick)) {
     const half = Math.max(20, (wcPick.s || 64) * 0.5) * k;
@@ -2627,6 +2715,44 @@ function wcBlit() {
     ctx.fillRect(px + half - h, py + half - h, h * 2, h * 2);
     ctx.strokeRect(px + half - h, py + half - h, h * 2, h * 2);
   }
+}
+
+function wcDrawLabel(ctx, st, k) { /* a written label: inked words with a pale halo */
+  const s = (st.s || 64) * k, x = st.x * k, y = st.y * k;
+  ctx.font = "700 " + Math.round(s * 0.38) + 'px "Cinzel",serif';
+  ctx.lineWidth = Math.max(2, s * 0.07);
+  ctx.lineJoin = "round";
+  ctx.strokeStyle = "rgba(255,255,255,.88)";
+  ctx.strokeText(st.t, x, y);
+  ctx.fillStyle = st.c || "#1e3247";
+  ctx.fillText(st.t, x, y);
+}
+
+function wcDrawHero(ctx, st, hero, k) { /* a hero's token: banner-colored disc, emblem, name */
+  const s = (st.s || 64) * k, x = st.x * k, y = st.y * k, r = s * 0.42;
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fillStyle = hero.color;
+  ctx.fill();
+  ctx.lineWidth = Math.max(1.5, s * 0.045);
+  ctx.strokeStyle = "rgba(255,255,255,.85)";
+  ctx.stroke();
+  ctx.lineWidth = Math.max(1, s * 0.02);
+  ctx.strokeStyle = "rgba(20,32,48,.55)";
+  ctx.stroke();
+  ctx.font = Math.round(s * 0.5) + 'px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",serif';
+  ctx.fillText(hero.emblem, x, y + s * 0.02);
+  wcDrawCaption(ctx, st.n || hero.name, x, y + (st.up ? -1 : 1) * (r + s * 0.16), s);
+}
+
+function wcDrawCaption(ctx, text, x, y, s) { /* small inked words riding a piece */
+  ctx.font = "700 " + Math.max(9, Math.round(s * 0.19)) + 'px "Cinzel",serif';
+  ctx.lineWidth = Math.max(2, s * 0.055);
+  ctx.lineJoin = "round";
+  ctx.strokeStyle = "rgba(255,255,255,.9)";
+  ctx.strokeText(text, x, y);
+  ctx.fillStyle = "#1e3247";
+  ctx.fillText(text, x, y);
 }
 
 function wcEnsureBg() { /* returns the scene image if ready; fetches it once when versions drift */
@@ -2680,7 +2806,8 @@ function wcHitSticker(x, y) { /* topmost first */
   for (let i = chart.stickers.length - 1; i >= 0; i--) {
     const st = chart.stickers[i];
     const r = Math.max(26, (st.s || 64) * 0.55);
-    if (Math.abs(x - st.x) <= r && Math.abs(y - st.y) <= r) return st;
+    const rx = st.t ? Math.max(r, st.t.length * (st.s || 64) * 0.11) : r;
+    if (Math.abs(x - st.x) <= rx && Math.abs(y - st.y) <= r) return st;
   }
   return null;
 }
@@ -2704,6 +2831,10 @@ function wcDown(e) {
       wcPick = hit; wcDragStk = hit; wcStkMoved = false;
     } else if (wcGlyph && wcBytes() + 60 < WC_MAX_BYTES) {
       const st = { g: wcGlyph, x, y, s: 64 };
+      chart.stickers.push(st);
+      wcPick = st; wcDragStk = st; wcStkMoved = true;
+    } else if (wcText.trim() && wcBytes() + 60 + wcText.length < WC_MAX_BYTES) {
+      const st = { t: wcText.trim().slice(0, 40), c: wcColor, x, y, s: 64 };
       chart.stickers.push(st);
       wcPick = st; wcDragStk = st; wcStkMoved = true;
     } else {
@@ -2819,6 +2950,24 @@ function wcGridHue(h) { chart.grid.hue = h; wcCommit(); wcBlit(); renderChart();
 /* ── stickers ── */
 function wcStickToggle() { wcStick = !wcStick; if (!wcStick) { wcPick = null; wcGlyph = null; } wcErase = false; wcBlit(); renderChart(); }
 function wcArmGlyph(i) { const g = WC_GLYPHS[i]; wcGlyph = wcGlyph === g ? null : g; renderChart(); }
+function wcCaption(v) { /* words pinned to the picked piece; synced when the quill lifts (onchange) */
+  if (!wcPick) return;
+  const t = v.trim().slice(0, 24);
+  if (t) wcPick.n = t; else { delete wcPick.n; delete wcPick.up; }
+  wcFull = wcBytes() > WC_MAX_BYTES;
+  wcSave(); wcRequestBlit();
+}
+function wcCapFlip() {
+  if (!wcPick) return;
+  if (wcPick.up) delete wcPick.up; else wcPick.up = 1;
+  wcCommit(); wcRequestBlit(); renderChart();
+}
+function wcDisarmGlyph() { /* writing a label lowers the armed glyph; keep the quill in hand */
+  if (!wcGlyph) return;
+  wcGlyph = null; renderChart();
+  const inp = document.getElementById("wc-textin");
+  if (inp) inp.focus();
+}
 function wcStkDel() {
   const i = chart.stickers.indexOf(wcPick);
   if (i >= 0) chart.stickers.splice(i, 1);
@@ -2948,7 +3097,7 @@ function renderChart(repaint) {
   const armed = Date.now() - wcArmClear <= 2600;
   const pickOn = wcStick && wcPick && chart.stickers.includes(wcPick);
   const sig = JSON.stringify([IS_MASTER, wcView, wcSel, wcColor, wcWidth, wcErase, armed, wcFull,
-    g.on, g.hue, chart.bgv, wcStick, wcGlyph, pickOn && wcPick.g, wcRenaming,
+    g.on, g.hue, chart.bgv, wcStick, wcGlyph, pickOn && chart.stickers.indexOf(wcPick), pickOn && wcPick.up, wcRenaming,
     charts.map(wcHasInk), charts.map((c) => c.name)]);
   if (el.dataset.sig !== sig) {
     el.dataset.sig = sig;
@@ -2980,14 +3129,31 @@ function renderChart(repaint) {
            <button class="wtool danger${armed ? " armed" : ""}" onclick="wcClear()" title="burn this chart's ink and pieces">${armed ? "SURE?" : "✕ CLEAR"}</button>`;
       glyphs.hidden = !wcStick;
       glyphs.innerHTML = wcStick
-        ? WC_GLYPHS.map((gl, i) =>
-            `<button class="wtool glyph${wcGlyph === gl ? " on" : ""}" onclick="wcArmGlyph(${i})" title="arm, then tap the chart to place">${gl}</button>`).join("")
+        ? WC_GLYPHS.map((gl, i) => {
+            const hero = gl[0] === "@" && CHARS[gl.slice(1)];
+            const face = hero
+              ? `<span style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:${hero.color};border:2px solid rgba(255,255,255,.85);font-size:13px">${hero.emblem}</span>`
+              : gl;
+            const tip = hero ? `place ${hero.name}'s token` : "arm, then tap the chart to place";
+            return `<button class="wtool glyph${wcGlyph === gl ? " on" : ""}" onclick="wcArmGlyph(${i})" title="${tip}">${face}</button>`;
+          }).join("")
+          + `<input id="wc-textin" maxlength="40" placeholder="✎ write a label…" value="${escapeHtml(wcText)}"
+               style="width:150px" oninput="wcText=this.value" onfocus="wcDisarmGlyph()"
+               title="write, then tap the chart to place the words">`
         : "";
     }
     foot.innerHTML = !IS_MASTER
       ? `<span class="mnote">the Warden's hand moves the quill — thine eyes behold it</span>`
       : pickOn
-      ? `<span class="mnote" style="flex:none;text-align:left">chosen piece: ${wcPick.g}</span>
+      ? `<span class="mnote" style="flex:none;text-align:left">chosen piece: ${
+            wcPick.t ? `“${escapeHtml(wcPick.t)}”`
+            : wcPick.g[0] === "@" && CHARS[wcPick.g.slice(1)]
+              ? `${CHARS[wcPick.g.slice(1)].emblem} ${CHARS[wcPick.g.slice(1)].name}`
+              : wcPick.g}</span>
+         ${wcPick.t ? "" : `<input id="wc-cap" maxlength="24" placeholder="✎ caption…" value="${escapeHtml(wcPick.n || "")}"
+             style="width:120px" oninput="wcCaption(this.value)" onchange="wcCommit()"
+             title="words that ride this piece">
+           <button class="wtool" onclick="wcCapFlip()" title="caption above or below the piece">${wcPick.up ? "⤒" : "⤓"}</button>`}
          <button class="wtool danger" onclick="wcStkDel()">🗑 REMOVE</button>
          <span class="mnote">drag to move · pull the corner square to resize</span>`
       : `<button class="wtool${g.on ? " on" : ""}" onclick="wcGridToggle()">▦ GRID</button>
@@ -3015,6 +3181,7 @@ if (IS_MASTER) {
 applyTheme();
 renderTabs();
 renderSheet();
+if (fjOn) { document.getElementById("fj").classList.add("open"); }
 renderLog();
 renderPool();
 renderNpcs();
