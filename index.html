@@ -451,8 +451,9 @@
   .logentry .who { font-style: italic; color: #2c5578; font-weight: 700; }
   .logentry .tot { float: right; font-family: "Cinzel", serif; font-weight: 900; font-size: 21px; color: var(--ink); }
   .logentry .det { color: var(--ink-soft); font-size: 13px; font-style: italic; }
+  .logbtns { display: flex; justify-content: center; gap: 8px; margin: -2px 0 10px; }
   .clearlog {
-    float: right; font-family: "IM Fell English", serif; font-style: italic; font-size: 12px;
+    font-family: "IM Fell English", serif; font-style: italic; font-size: 12px;
     background: none; border: 1px solid #9cbeda; color: var(--ink-soft); border-radius: 5px; padding: 3px 10px; cursor: pointer;
   }
   /* ── the Table's Journal: every die at the table, one ledger, shown inside the journal panel ── */
@@ -662,9 +663,11 @@
       <button id="reroll" onclick="reroll()">⟳ ROLL AGAIN</button>
     </div>
     <div class="panel">
-      <h2><span id="logowner">The Warden's Journal</span>
+      <h2><span id="logowner">The Warden's Journal</span></h2>
+      <div class="logbtns">
+        <button class="clearlog" id="logmode" onclick="logModeToggle()" title="one hero's page, or the whole table's ledger">📜 the whole table</button>
         <button class="clearlog" id="logclear" onclick="clearLog()">let it snow over</button>
-        <button class="clearlog" id="logmode" onclick="logModeToggle()" title="one hero's page, or the whole table's ledger">📜 the whole table</button></h2>
+      </div>
       <div id="log"></div>
     </div>
   </div>
