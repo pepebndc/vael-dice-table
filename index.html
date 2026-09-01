@@ -2804,8 +2804,8 @@ function wcFogRepaint() { /* the veil: solid cover, reveal marks punch through, 
   ctx.fillRect(0, 0, WC_W * k, WC_H * k);
   const marks = wcFogLive ? chart.fog.marks.concat([wcFogLive]) : chart.fog.marks;
   for (const m of marks) wcDrawStroke(ctx, { p: m.p, w: m.w, e: !m.v, c: "#151b28" }, k);
-  /* mist drifts over the veil — fainter for the Warden, who must see to work */
-  const t = performance.now();
+  /* mist over the veil — it drifts for players; the Warden's hangs still and faint */
+  const t = IS_MASTER ? 0 : performance.now();
   const dim = IS_MASTER ? 0.6 : 1;
   ctx.globalCompositeOperation = "source-atop"; /* clings to the fog, never the clearings */
   wcMistLayer(ctx, k, t * 0.006, t * 0.0026, 2.4, 0.34 * dim);
@@ -2848,7 +2848,7 @@ function wcMistLayer(ctx, k, dx, dy, scale, alpha) {
 let wcMistReq = 0, wcMistLast = 0;
 function wcMistTick(t) {
   wcMistReq = 0;
-  if (!wcView || !chart.fog || !chart.fog.on || document.visibilityState !== "visible") return;
+  if (IS_MASTER || !wcView || !chart.fog || !chart.fog.on || document.visibilityState !== "visible") return;
   if (t - wcMistLast >= 50) { /* ~20 breaths a second is drift enough */
     wcMistLast = t;
     wcFogRepaint();
@@ -2857,7 +2857,7 @@ function wcMistTick(t) {
   wcMistReq = requestAnimationFrame(wcMistTick);
 }
 function wcMistStart() {
-  if (!wcMistReq && wcView && chart.fog && chart.fog.on) wcMistReq = requestAnimationFrame(wcMistTick);
+  if (!IS_MASTER && !wcMistReq && wcView && chart.fog && chart.fog.on) wcMistReq = requestAnimationFrame(wcMistTick);
 }
 
 function wcBlit() {
