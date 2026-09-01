@@ -25,7 +25,7 @@ Three script blocks:
    - Rollers, trackers (HP, spell slots, rage), roll journal. Per-player state persists in localStorage.
    - **Cross-device sync** (search `cross-device sync`): the core shared mechanism. State is split into named bundles (per-character `paco`/`ray`/`odinson` plus Warden-owned shared bundles `npcs`, `music`, `map`). `markDirty(who)` coalesces edits (1200 ms debounce) into `pushDirty()`, which serializes PUTs one at a time (concurrent PUTs can land out of order). A fixed 6-second poll (`POLL_MS`), paused while the tab is hidden, does the reads. `lastPushedSig` skips writes with unchanged content. Tables are namespaced by `?table=` (default `the-proving`).
    - **The Bard's Veil** (search `BARD_`): ~400-track music library with moods; the Warden's tab is the DJ and broadcasts now-playing over the `music` bundle; other devices follow. Tracks stream from the Internet Archive.
-   - **The Warden's Chart** (search `WC_`): shared drawing canvas with up to 8 named charts, grid, emoji pieces, and uploadable background scenes. Chart strokes ride the `map` bundle and must stay under `WC_MAX_BYTES` (92 KB, headroom under the API's 100 KB cap). Backgrounds are compressed client-side and stored under separate `mapbg-cN` keys fetched on demand.
+   - **The Warden's Chart** (search `WC_`): shared drawing canvas with up to 8 named charts, grid, emoji pieces, and uploadable background scenes. The `map` bundle in the poll carries only chart metadata (names, grids, `bgv` scene versions, `cv` content versions). Each chart's strokes and stickers live under a separate `mapchart-cN` key, pushed on edit and fetched on demand via `?chart=` when its `cv` moves. A chart body must stay under `WC_MAX_BYTES` (900 KB, headroom under the API's 1 MB per-chart cap). Backgrounds are compressed client-side and stored under separate `mapbg-cN` keys fetched on demand.
 
 2. **`<script type="importmap">`**: pins Three.js to a CDN URL.
 
@@ -36,8 +36,8 @@ Three script blocks:
 The entire backend. Talks to Upstash Redis via its REST API with plain `fetch` (no SDK). Key design constraints to preserve:
 
 - Reads are a single `MGET` over the fixed `KEYS` list; saves are a single `SET`. This keeps a weekly campaign well inside Upstash's free tier, so do not add per-request `LIST`/`SCAN` calls or extra commands to the hot path.
-- Chart backgrounds (`mapbg-cN`) are deliberately excluded from the poll MGET (they carry compressed images) and fetched via `?bg=` with long-lived caching, versioned by `bgv`.
-- Payload caps: 100 KB per bundle, 450 KB for backgrounds. The client-side `WC_MAX_BYTES` must stay under the bundle cap.
+- Chart bodies (`mapchart-cN`) and backgrounds (`mapbg-cN`) are deliberately excluded from the poll MGET and fetched via `?chart=` / `?bg=` with long-lived caching, versioned by `cv` / `bgv`.
+- Payload caps: 100 KB per poll bundle, 1 MB for chart bodies, 450 KB for backgrounds. The client-side `WC_MAX_BYTES` must stay under the chart-body cap with room for JSON escaping (Upstash's REST request cap is 1 MB).
 - Adding a new synced bundle means updating `CHARS`/`SHARED`/`KEYS` in `api/state.js` **and** the client's push/poll logic in `index.html` together.
 
 ## Conventions

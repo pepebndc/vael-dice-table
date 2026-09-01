@@ -8,10 +8,12 @@
 const CHARS = new Set(["paco", "ray", "odinson"]);
 const SHARED = new Set(["npcs", "music", "map"]);
 // Every key this table can hold — a fixed set, so reads are a single MGET.
+// "map" carries only chart metadata (names, grids, content versions).
 const KEYS = ["paco", "ray", "odinson", "npcs", "music", "map"];
-// Chart backgrounds live under their own keys, fetched on demand (never in
-// the poll MGET — they carry a compressed image and would bloat every poll).
+// Chart bodies (strokes/stickers) and backgrounds live under their own keys,
+// fetched on demand (never in the poll MGET — they would bloat every poll).
 const MAPBG = /^mapbg-c\d{1,2}$/;
+const MAPCHART = /^mapchart-c\d{1,2}$/;
 
 const REST_URL = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
 const REST_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
@@ -43,11 +45,12 @@ export default async function handler(req, res) {
 
   try {
     if (req.method === "GET") {
-      const bg = req.query.bg;
-      if (bg) {
-        if (!MAPBG.test(String(bg))) return res.status(400).json({ error: "bad key" });
-        const v = await redis(["GET", prefix + bg]);
-        res.setHeader("Cache-Control", "private, max-age=31536000"); /* content is versioned by bgv */
+      const onDemand = req.query.bg || req.query.chart;
+      if (onDemand) {
+        const key = String(onDemand);
+        if (!MAPBG.test(key) && !MAPCHART.test(key)) return res.status(400).json({ error: "bad key" });
+        const v = await redis(["GET", prefix + key]);
+        res.setHeader("Cache-Control", "private, max-age=31536000"); /* content is versioned by bgv / cv */
         return res.status(200).json(v ? JSON.parse(v) : {});
       }
       const vals = await redis(["MGET", ...KEYS.map((k) => prefix + k)]);
@@ -63,11 +66,14 @@ export default async function handler(req, res) {
     if (req.method === "PUT") {
       const { who, bundle } = req.body || {};
       const isBg = typeof who === "string" && MAPBG.test(who);
-      if ((!CHARS.has(who) && !SHARED.has(who) && !isBg) || !bundle || typeof bundle !== "object") {
+      const isChart = typeof who === "string" && MAPCHART.test(who);
+      if ((!CHARS.has(who) && !SHARED.has(who) && !isBg && !isChart) || !bundle || typeof bundle !== "object") {
         return res.status(400).json({ error: "bad payload" });
       }
       const body = JSON.stringify(bundle);
-      if (body.length > (isBg ? 450000 : 100000)) {
+      /* chart bodies get 1MB; Upstash's REST request cap is also 1MB, so the
+         client stops earlier (WC_MAX_BYTES) to leave room for escaping */
+      if (body.length > (isChart ? 1000000 : isBg ? 450000 : 100000)) {
         return res.status(413).json({ error: "too large" });
       }
       await redis(["SET", prefix + who, body]);

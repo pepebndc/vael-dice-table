@@ -1511,16 +1511,22 @@ async function pushDirty() {
      older bundle overwrite a newer one (e.g. rapid chart edits) */
   if (pushing) { pushAgain = true; return; }
   pushing = true;
-  const whos = Object.keys(dirtyChars);
+  /* chart bodies go before the "map" meta — if the meta (with a new cv) landed
+     first, a follower could fetch and cache a stale body under that cv */
+  const whos = Object.keys(dirtyChars).sort((a, b) => (a === "map") - (b === "map"));
   dirtyChars = {};
   for (const who of whos) {
+    const bodyOf = who.startsWith("mapchart-") ? charts.find((c) => "mapchart-" + c.id === who) : null;
+    if (who.startsWith("mapchart-") && !bodyOf) continue; /* the vellum was dropped meanwhile */
     const bundle = who === "music"
       ? { ...(bardShared || {}), updatedAt: syncMeta.music || Date.now() }
       : who === "map"
-      ? { charts: wcLive || wcDragStk
-            ? charts.map((c) => c !== chart ? c
-                : wcLive ? { ...c, strokes: c.strokes.concat([wcLive]) } : { ...c })
-            : charts,
+      ? { charts: charts.map((c) => ({ id: c.id, name: c.name, grid: c.grid, bgv: c.bgv, cv: c.cv || 0 })),
+          updatedAt: syncMeta.map || Date.now() }
+      : bodyOf
+      ? { strokes: bodyOf === chart && wcLive ? bodyOf.strokes.concat([wcLive]) : bodyOf.strokes,
+          stickers: bodyOf.stickers,
+          v: bodyOf.cv || 0,
           updatedAt: syncMeta.map || Date.now() }
       : who === "npcs"
       ? { npcs, updatedAt: syncMeta.npcs || Date.now() }
@@ -1598,14 +1604,13 @@ async function pullState() {
         renderMusic(); followMusic();
       }
       /* the Warden's Chart: like npcs, newest-wins for everyone (the Warden may
-         chart from a second device). Not part of `changed` — no sheet re-render. */
+         chart from a second device). Not part of `changed` — no sheet re-render.
+         The poll carries only the meta (names, grids, content versions); chart
+         bodies are fetched on demand when a version moves. */
       const rmap = remote.map;
       if (rmap && rmap.updatedAt && (syncMeta.map || 0) < rmap.updatedAt) {
-        charts = wcNormalize(rmap);
-        wcSel = Math.min(wcSel, charts.length - 1);
-        chart = charts[wcSel];
+        wcApplyMeta(rmap);
         syncMeta.map = rmap.updatedAt;
-        localStorage.setItem(WC_LS, JSON.stringify({ charts }));
         localStorage.setItem("diceTableSyncMeta", JSON.stringify(syncMeta));
         renderChart(true);
       }
@@ -1626,7 +1631,15 @@ async function pullState() {
           if (!remote[who]) { dirtyChars[who] = true; seeding = true; }
         }
         if (IS_MASTER && !remote.npcs && npcs.length) { dirtyChars.npcs = true; seeding = true; }
-        if (IS_MASTER && !remote.map && charts.some(wcHasInk)) { dirtyChars.map = true; seeding = true; }
+        if (IS_MASTER && !remote.map && charts.some(wcHasInk)) {
+          dirtyChars.map = true;
+          for (const c of charts) {
+            if (!c.strokes.length && !c.stickers.length) continue;
+            if (!c.cv) c.cv = Date.now();
+            dirtyChars["mapchart-" + c.id] = true;
+          }
+          seeding = true;
+        }
         if (seeding) { clearTimeout(pushTimer); pushTimer = setTimeout(pushDirty, 1200); }
       }
     }
@@ -2515,8 +2528,9 @@ function bardTickUi() { /* cheap 1s tick: only the progress bars and clock move 
 
 /* ── The Warden's Chart: a shared vellum the Warden sketches on and the whole
    table beholds. Strokes are vectors in a fixed 1000×700 space (resolution-
-   independent, compact enough for the 100KB sync bundle); the grid rides along
-   in the same bundle so everyone sees the Warden's chosen weave. ── */
+   independent). The poll carries only the "map" meta bundle (names, grids,
+   scene and content versions); each chart's ink ships under its own
+   mapchart-cN key, fetched on demand when its content version moves. ── */
 const WC_LS = "diceTableChart:" + TABLE;
 const WC_SEEN_LS = "diceTableChartSeen:" + TABLE;
 const WC_SEL_LS = "diceTableChartSel:" + TABLE;
@@ -2524,7 +2538,11 @@ const WC_W = 1000, WC_H = 700;
 const WC_COLORS = ["#22242c", "#b03a2e", "#2e6da4", "#2f7d4f", "#c9962e", "#7d3f98", "#f2ede2", "#c05c20"];
 const WC_WIDTHS = [3, 6, 12];
 const WC_GRID_HUES = { frost: "74,112,150", ash: "60,60,68", ember: "160,100,30" };
-const WC_MAX_BYTES = 92000; /* headroom under api/state's 100KB cap */
+/* Each chart body ships under its own mapchart-cN key with a 1MB server cap.
+   Upstash's REST request cap is also 1MB and JSON escaping inflates the
+   command, so the quill stops early enough to always fit. */
+const WC_MAX_BYTES = 900000;  /* per chart — new ink refused past this */
+const WC_HARD_BYTES = 950000; /* per chart — even the eraser stops here */
 const WC_MAX_CHARTS = 8;
 const WC_GLYPHS = [
   /* the heroes themselves — drawn as banner-colored tokens, not plain glyphs */
@@ -2547,6 +2565,7 @@ function wcNormalize(doc) { /* accepts the synced doc, older shapes, or garbage;
     grid: c.grid && typeof c.grid === "object" ? c.grid : { on: false, size: 60, hue: "frost" },
     stickers: Array.isArray(c.stickers) ? c.stickers : [],
     bgv: c.bgv || 0,
+    cv: c.cv || 0, /* content version — bumped on stroke/sticker edits, keys the on-demand body fetch */
   }));
   /* drop trailing blank vellums (earlier versions always carried four) */
   while (cs.length > 1 && !wcHasInk(cs[cs.length - 1]) && !cs[cs.length - 1].name) cs.pop();
@@ -2567,7 +2586,7 @@ let wcView = false;
 let wcSeen = parseInt(localStorage.getItem(WC_SEEN_LS) || "0", 10) || 0;
 let wcColor = WC_COLORS[0], wcWidth = WC_WIDTHS[1], wcErase = false;
 let wcArmClear = 0; /* two-tap clear: timestamp while armed */
-let wcFull = false;
+let wcFull = wcBytes() > WC_MAX_BYTES;
 let wcLive = null;  /* the stroke under the quill right now */
 let wcInk = null;   /* offscreen ink layer (strokes only, so the eraser spares the grid) */
 let wcBlitReq = 0;
@@ -2584,9 +2603,17 @@ const wcBgCache = {};  /* chart id → {v, img} — scenes fetched once, not per
 function wcCanvas() { return document.getElementById("wc-canvas"); }
 function wcScale() { const c = wcCanvas(); return c ? c.width / WC_W : 1; }
 
-function wcSave() { localStorage.setItem(WC_LS, JSON.stringify({ charts })); }
-function wcBytes() { return JSON.stringify(charts).length; }
-function wcCommit() {
+function wcSave() {
+  /* eight near-full vellums can outgrow the localStorage quota — the store
+     stays authoritative, so a failed local cache is survivable */
+  try { localStorage.setItem(WC_LS, JSON.stringify({ charts })); } catch (e) {}
+}
+function wcBytes() { return JSON.stringify(chart).length; } /* the active vellum only */
+function wcCommit(metaOnly) { /* metaOnly: name/grid/scene changed, the ink didn't */
+  if (!metaOnly) {
+    chart.cv = Date.now();
+    if (SYNC_ON && syncEnabled) dirtyChars["mapchart-" + chart.id] = true;
+  }
   wcSave();
   markDirty("map");
   /* chart edits skip the coalescing delay — the table is watching live */
@@ -2602,12 +2629,77 @@ function wcBeam() { /* mid-stroke: push the half-drawn line about once a second 
   const now = Date.now();
   if (now - wcLastBeam < 1000) return;
   wcLastBeam = now;
+  chart.cv = now;
   syncMeta.map = now;
   localStorage.setItem("diceTableSyncMeta", JSON.stringify(syncMeta));
   wcSeen = now;
   localStorage.setItem(WC_SEEN_LS, String(wcSeen));
   dirtyChars.map = true;
+  dirtyChars["mapchart-" + chart.id] = true;
   pushDirty();
+}
+
+/* ── meta ↔ body sync: the poll carries chart meta; bodies follow on demand ── */
+const wcBodyWant = {}; /* chart id → cv already being fetched */
+function wcFetchBody(id, cv) {
+  if (wcBodyWant[id] === cv) return;
+  wcBodyWant[id] = cv;
+  fetch(`/api/state?table=${TABLE}&chart=mapchart-${id}&v=${cv}`)
+    .then((r) => (r.ok ? r.json() : null))
+    .then((b) => {
+      if (wcBodyWant[id] !== cv) return; /* a newer fetch took over */
+      delete wcBodyWant[id];
+      const c = charts.find((x) => x.id === id);
+      if (!c || (c.cv || 0) >= cv) return;
+      if (!b || (b.v || 0) < cv) return; /* the meta outran the body — next poll retries */
+      c.strokes = Array.isArray(b.strokes) ? b.strokes : [];
+      c.stickers = Array.isArray(b.stickers) ? b.stickers : [];
+      c.cv = b.v;
+      wcSave();
+      if (c === chart) {
+        wcFull = wcBytes() > WC_MAX_BYTES;
+        wcPick = null;
+        wcRepaintInk(); wcBlit();
+      }
+      renderChart();
+    })
+    .catch(() => { if (wcBodyWant[id] === cv) delete wcBodyWant[id]; });
+}
+function wcApplyMeta(rmap) {
+  if ((Array.isArray(rmap.charts) ? rmap.charts : [rmap]).some((c) => Array.isArray(c.strokes))) {
+    /* a bundle from before the split still carries its bodies inline: adopt
+       them, and let the Warden's device rewrite the store in the new shape */
+    charts = wcNormalize(rmap);
+    for (const c of charts) {
+      if (!c.cv && (c.strokes.length || c.stickers.length)) c.cv = rmap.updatedAt;
+      if (IS_MASTER && (c.strokes.length || c.stickers.length)) dirtyChars["mapchart-" + c.id] = true;
+    }
+    if (IS_MASTER) { dirtyChars.map = true; clearTimeout(pushTimer); pushTimer = setTimeout(pushDirty, 1200); }
+  } else {
+    const metas = (Array.isArray(rmap.charts) ? rmap.charts : []).slice(0, WC_MAX_CHARTS);
+    const prev = charts;
+    charts = metas.map((m, i) => {
+      const id = typeof m.id === "string" && /^c\d{1,2}$/.test(m.id) ? m.id : "c" + (i + 1);
+      const had = prev.find((x) => x.id === id);
+      const c = {
+        id,
+        name: typeof m.name === "string" ? m.name.slice(0, 24) : "",
+        grid: m.grid && typeof m.grid === "object" ? m.grid : { on: false, size: 60, hue: "frost" },
+        bgv: m.bgv || 0,
+        strokes: had ? had.strokes : [],
+        stickers: had ? had.stickers : [],
+        cv: had ? had.cv || 0 : 0,
+      };
+      if ((m.cv || 0) > c.cv) wcFetchBody(id, m.cv); /* the ink moved — fetch it */
+      return c;
+    });
+    if (!charts.length) charts = wcNormalize(null);
+  }
+  wcSel = Math.min(wcSel, charts.length - 1);
+  chart = charts[wcSel];
+  wcFull = wcBytes() > WC_MAX_BYTES;
+  if (wcPick && !chart.stickers.includes(wcPick)) wcPick = null;
+  wcSave();
 }
 
 function wcDrawStroke(ctx, s, k) {
@@ -2896,8 +2988,8 @@ function wcUp() {
   const s = wcLive;
   wcLive = null;
   const grown = wcBytes() + JSON.stringify(s).length;
-  /* soft cap blocks new ink; hard cap (the API's 100KB) blocks even erasing */
-  if (grown > 97000 || (grown > WC_MAX_BYTES && !s.e)) {
+  /* soft cap blocks new ink; the hard cap blocks even erasing */
+  if (grown > WC_HARD_BYTES || (grown > WC_MAX_BYTES && !s.e)) {
     wcFull = true;
     wcRepaintInk(); wcBlit(); /* the refused stroke fades away */
     wcCommit(); /* retract any half-stroke already beamed to the table */
@@ -2932,9 +3024,9 @@ function wcClear() {
   wcFull = wcBytes() > WC_MAX_BYTES;
   wcCommit(); wcRepaintInk(); wcBlit(); renderChart();
 }
-function wcGridToggle() { chart.grid.on = !chart.grid.on; wcCommit(); wcBlit(); renderChart(); }
-function wcGridSize(v) { chart.grid.size = parseInt(v, 10) || 60; wcCommit(); wcBlit(); }
-function wcGridHue(h) { chart.grid.hue = h; wcCommit(); wcBlit(); renderChart(); }
+function wcGridToggle() { chart.grid.on = !chart.grid.on; wcCommit(true); wcBlit(); renderChart(); }
+function wcGridSize(v) { chart.grid.size = parseInt(v, 10) || 60; wcCommit(true); wcBlit(); }
+function wcGridHue(h) { chart.grid.hue = h; wcCommit(true); wcBlit(); renderChart(); }
 
 /* ── stickers ── */
 function wcStickToggle() { wcStick = !wcStick; if (!wcStick) { wcPick = null; wcGlyph = null; } wcErase = false; wcBlit(); renderChart(); }
@@ -2988,15 +3080,15 @@ function wcSwitch(i) {
 function wcAddChart() {
   if (!IS_MASTER || charts.length >= WC_MAX_CHARTS) return;
   const n = 1 + Math.max(...charts.map((c) => parseInt(c.id.slice(1), 10) || 0));
-  charts.push({ id: "c" + n, name: "", strokes: [], grid: { on: false, size: 60, hue: "frost" }, stickers: [], bgv: 0 });
-  wcCommit();
+  charts.push({ id: "c" + n, name: "", strokes: [], grid: { on: false, size: 60, hue: "frost" }, stickers: [], bgv: 0, cv: 0 });
+  wcCommit(true);
   wcSwitch(charts.length - 1);
 }
 function wcRename() { wcRenaming = !wcRenaming; renderChart(); }
 function wcRenamed(v) {
   wcRenaming = false;
   chart.name = String(v || "").trim().slice(0, 24);
-  wcCommit();
+  wcCommit(true);
   renderChart();
 }
 
@@ -3035,7 +3127,7 @@ async function wcBgChosen(input) {
     const shown = new Image();
     shown.onload = () => { wcBgCache[target.id] = { v: target.bgv, img: shown }; if (chart === target) wcBlit(); };
     shown.src = data;
-    wcCommit(); renderChart();
+    wcCommit(true); renderChart();
   } catch (e) {
     alertNote("the scene would not take — try a smaller image");
   }
@@ -3043,7 +3135,7 @@ async function wcBgChosen(input) {
 function wcBgRemove() {
   chart.bgv = 0;
   delete wcBgCache[chart.id];
-  wcCommit(); wcBlit(); renderChart();
+  wcCommit(true); wcBlit(); renderChart();
 }
 function alertNote(msg) { /* quiet footer note, no blocking dialogs */
   const n = document.querySelector("#wc-foot .mnote");
