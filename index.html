@@ -584,6 +584,7 @@
     min-width: 30px; height: 28px; padding: 0 8px; cursor: pointer; transition: all .15s;
   }
   #wchart .wtool:hover { transform: translateY(1px); background: rgba(255,255,255,.7); }
+  #wchart .wtool:disabled { opacity: .4; cursor: default; pointer-events: none; }
   #wchart .wtool.on {
     background: linear-gradient(180deg, #3a2c12, #221806); color: #ffd97a;
     border-color: #c89a3c; box-shadow: 0 0 8px rgba(224,154,60,.35);
@@ -604,6 +605,20 @@
   #wc-canvas.quill { cursor: crosshair; }
   #wc-zoom { position: absolute; right: 8px; top: 8px; z-index: 2; opacity: .88; }
   #wc-zoom[hidden] { display: none; }
+  #wchart .wswitch {
+    position: relative; flex: none; width: 42px; height: 22px; padding: 0; cursor: pointer;
+    border: 1px solid var(--frost-edge); border-radius: 11px;
+    background: rgba(255,255,255,.5); transition: all .15s;
+  }
+  #wchart .wswitch i {
+    position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; display: block;
+    border-radius: 50%; background: #8fa3ba; transition: all .15s;
+  }
+  #wchart .wswitch.on {
+    background: linear-gradient(180deg, #3a2c12, #221806);
+    border-color: #c89a3c; box-shadow: 0 0 8px rgba(224,154,60,.35);
+  }
+  #wchart .wswitch.on i { left: 22px; background: #ffd97a; }
   #wchart .wcfoot { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
   #wchart .wcfoot input[type=range] { flex: none; width: 110px; accent-color: var(--accent); padding: 0; background: none; border: none; }
   #wchart .wcfoot .mnote { flex: 1; text-align: right; font-size: 11px; }
@@ -3588,7 +3603,8 @@ function renderChart(repaint) {
            <button class="wtool danger${armed ? " armed" : ""}" onclick="wcClear()" title="burn this chart's ink, pieces and fog">${armed ? "SURE?" : "✕ CLEAR"}</button>`;
       fogBar.hidden = !wcFogPanel;
       fogBar.innerHTML = wcFogPanel
-        ? `<button class="wtool${chart.fog.on ? " on" : ""}" onclick="wcFogActive()" title="raise or lift the veil over this vellum">☁ ${chart.fog.on ? "VEIL RAISED" : "VEIL LIFTED"}</button>
+        ? `<span class="mnote" style="flex:none">ACTIVE</span>
+           <button class="wswitch${chart.fog.on ? " on" : ""}" role="switch" aria-checked="${chart.fog.on ? "true" : "false"}" onclick="wcFogActive()" title="raise or lift the veil over this vellum"><i></i></button>
            <span style="width:6px"></span>
            <button class="wtool${wcFogMode === "reveal" ? " on" : ""}" onclick="wcFogBrush('reveal')" title="brush the fog aside — quill weights size the brush" ${chart.fog.on ? "" : "disabled"}>🔦 REVEAL</button>
            <button class="wtool${wcFogMode === "veil" ? " on" : ""}" onclick="wcFogBrush('veil')" title="draw the fog back over" ${chart.fog.on ? "" : "disabled"}>🌫 VEIL</button>
