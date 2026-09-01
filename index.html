@@ -2804,14 +2804,14 @@ function wcFogRepaint() { /* the veil: solid cover, reveal marks punch through, 
   ctx.fillRect(0, 0, WC_W * k, WC_H * k);
   const marks = wcFogLive ? chart.fog.marks.concat([wcFogLive]) : chart.fog.marks;
   for (const m of marks) wcDrawStroke(ctx, { p: m.p, w: m.w, e: !m.v, c: "#151b28" }, k);
-  if (!IS_MASTER) { /* mist drifts over the veil for the players' eyes only */
-    const t = performance.now();
-    ctx.globalCompositeOperation = "source-atop"; /* clings to the fog, never the clearings */
-    wcMistLayer(ctx, k, t * 0.0026, t * 0.0011, 2.4, 0.34);
-    wcMistLayer(ctx, k, -t * 0.0041, t * 0.0019, 1.4, 0.24);
-    ctx.globalAlpha = 1;
-    ctx.globalCompositeOperation = "source-over";
-  }
+  /* mist drifts over the veil — fainter for the Warden, who must see to work */
+  const t = performance.now();
+  const dim = IS_MASTER ? 0.6 : 1;
+  ctx.globalCompositeOperation = "source-atop"; /* clings to the fog, never the clearings */
+  wcMistLayer(ctx, k, t * 0.006, t * 0.0026, 2.4, 0.34 * dim);
+  wcMistLayer(ctx, k, -t * 0.009, t * 0.0042, 1.4, 0.24 * dim);
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = "source-over";
   ctx.setTransform(1, 0, 0, 1, 0, 0);
 }
 
@@ -2848,7 +2848,7 @@ function wcMistLayer(ctx, k, dx, dy, scale, alpha) {
 let wcMistReq = 0, wcMistLast = 0;
 function wcMistTick(t) {
   wcMistReq = 0;
-  if (IS_MASTER || !wcView || !chart.fog || !chart.fog.on || document.visibilityState !== "visible") return;
+  if (!wcView || !chart.fog || !chart.fog.on || document.visibilityState !== "visible") return;
   if (t - wcMistLast >= 50) { /* ~20 breaths a second is drift enough */
     wcMistLast = t;
     wcFogRepaint();
@@ -2857,7 +2857,7 @@ function wcMistTick(t) {
   wcMistReq = requestAnimationFrame(wcMistTick);
 }
 function wcMistStart() {
-  if (!IS_MASTER && !wcMistReq && wcView && chart.fog && chart.fog.on) wcMistReq = requestAnimationFrame(wcMistTick);
+  if (!wcMistReq && wcView && chart.fog && chart.fog.on) wcMistReq = requestAnimationFrame(wcMistTick);
 }
 
 function wcBlit() {
