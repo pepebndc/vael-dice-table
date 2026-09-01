@@ -2609,13 +2609,14 @@ const wcBgCache = {};  /* chart id → {v, img} — scenes fetched once, not per
 
 /* the roaming eye: a local view onto the vellum (never synced) */
 let wcVX = 0, wcVY = 0, wcVK = 1; /* world offset + zoom, 1 = the whole vellum */
-const WC_ZOOM_MAX = 8;
+const WC_ZOOM_MIN = 0.5, WC_ZOOM_MAX = 8; /* below 1 the vellum floats centered with margin */
 let wcPan = false;       /* the Warden's open-hand tool; players roam by plain drag */
 let wcPanDrag = null;    /* {sx, sy, vx0, vy0} while a drag moves the view */
 const wcPtrs = new Map();/* live pointers, for pinch */
 let wcPinch = null;      /* {d0, k0, wx, wy} while two fingers stretch the view */
 let wcBgPlace = false;   /* the Warden anchors the scene: drag moves, corner scales */
 let wcBgDrag = null;     /* {mode, dx, dy} | {mode:"size", ratio} */
+let wcFogPanel = false;  /* the FOG tab is unfolded (local, shows the fog tools) */
 let wcFogMode = null;    /* "reveal" | "veil" while the fog brush is in hand */
 let wcFogLive = null;    /* the fog mark under the brush right now */
 let wcFogCv = null;      /* offscreen fog layer (marks punch through it) */
@@ -2625,15 +2626,20 @@ function wcScale() { const c = wcCanvas(); return c ? c.width / WC_W : 1; }
 function wcK() { return wcScale() * wcVK; } /* full world → device scale, zoom included */
 
 function wcClampView() {
-  wcVK = Math.max(1, Math.min(WC_ZOOM_MAX, wcVK));
-  wcVX = Math.max(0, Math.min(WC_W - WC_W / wcVK, wcVX));
-  wcVY = Math.max(0, Math.min(WC_H - WC_H / wcVK, wcVY));
+  wcVK = Math.max(WC_ZOOM_MIN, Math.min(WC_ZOOM_MAX, wcVK));
+  if (wcVK <= 1) { /* the whole vellum in sight: hold it centered, margin all around */
+    wcVX = (WC_W - WC_W / wcVK) / 2;
+    wcVY = (WC_H - WC_H / wcVK) / 2;
+  } else {
+    wcVX = Math.max(0, Math.min(WC_W - WC_W / wcVK, wcVX));
+    wcVY = Math.max(0, Math.min(WC_H - WC_H / wcVK, wcVY));
+  }
 }
 let wcViewReq = 0;
 function wcViewChanged() { /* coalesce roam/zoom repaints into one per frame */
   wcClampView();
   const b = document.getElementById("wc-zoom");
-  if (b) { b.hidden = wcVK === 1; b.textContent = "⌖ ×" + (wcVK < 3 ? wcVK.toFixed(1) : Math.round(wcVK)); }
+  if (b) { b.hidden = Math.abs(wcVK - 1) < 0.001; b.textContent = "⌖ ×" + (wcVK < 3 ? wcVK.toFixed(1) : Math.round(wcVK)); }
   if (wcViewReq) return;
   wcViewReq = requestAnimationFrame(() => { wcViewReq = 0; wcRepaintInk(); wcFogRepaint(); wcBlit(); });
 }
@@ -2642,7 +2648,7 @@ function wcZoomAt(clientX, clientY, factor) { /* zoom while the point under the 
   const r = wcCanvas().getBoundingClientRect();
   const fx = (clientX - r.left) / r.width, fy = (clientY - r.top) / r.height;
   const wx = wcVX + fx * WC_W / wcVK, wy = wcVY + fy * WC_H / wcVK;
-  wcVK = Math.max(1, Math.min(WC_ZOOM_MAX, wcVK * factor));
+  wcVK = Math.max(WC_ZOOM_MIN, Math.min(WC_ZOOM_MAX, wcVK * factor));
   wcVX = wx - fx * WC_W / wcVK;
   wcVY = wy - fy * WC_H / wcVK;
   wcViewChanged();
@@ -2798,7 +2804,60 @@ function wcFogRepaint() { /* the veil: solid cover, reveal marks punch through, 
   ctx.fillRect(0, 0, WC_W * k, WC_H * k);
   const marks = wcFogLive ? chart.fog.marks.concat([wcFogLive]) : chart.fog.marks;
   for (const m of marks) wcDrawStroke(ctx, { p: m.p, w: m.w, e: !m.v, c: "#151b28" }, k);
+  if (!IS_MASTER) { /* mist drifts over the veil for the players' eyes only */
+    const t = performance.now();
+    ctx.globalCompositeOperation = "source-atop"; /* clings to the fog, never the clearings */
+    wcMistLayer(ctx, k, t * 0.0026, t * 0.0011, 2.4, 0.34);
+    wcMistLayer(ctx, k, -t * 0.0041, t * 0.0019, 1.4, 0.24);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+  }
   ctx.setTransform(1, 0, 0, 1, 0, 0);
+}
+
+/* ── the mist: a tileable breath of pale cloud, drawn once, drifted forever ── */
+let wcMistTex = null;
+function wcMist() {
+  if (wcMistTex) return wcMistTex;
+  const t = document.createElement("canvas");
+  t.width = t.height = 256;
+  const x = t.getContext("2d");
+  let seed = 7;
+  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  for (let i = 0; i < 60; i++) { /* soft blobs, wrapped 3×3 so the tile has no seam */
+    const cx = rnd() * 256, cy = rnd() * 256, r = 22 + rnd() * 48, a = 0.05 + rnd() * 0.08;
+    const g = x.createRadialGradient(0, 0, 0, 0, 0, r);
+    g.addColorStop(0, `rgba(178,194,216,${a})`);
+    g.addColorStop(1, "rgba(178,194,216,0)");
+    for (const ox of [-256, 0, 256]) for (const oy of [-256, 0, 256]) {
+      x.save(); x.translate(cx + ox, cy + oy);
+      x.fillStyle = g; x.beginPath(); x.arc(0, 0, r, 0, Math.PI * 2); x.fill();
+      x.restore();
+    }
+  }
+  wcMistTex = t;
+  return t;
+}
+function wcMistLayer(ctx, k, dx, dy, scale, alpha) {
+  const pat = ctx.createPattern(wcMist(), "repeat");
+  pat.setTransform(new DOMMatrix().translate(dx % (256 * scale), dy % (256 * scale)).scale(scale));
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = pat;
+  ctx.fillRect(0, 0, WC_W * k, WC_H * k);
+}
+let wcMistReq = 0, wcMistLast = 0;
+function wcMistTick(t) {
+  wcMistReq = 0;
+  if (IS_MASTER || !wcView || !chart.fog || !chart.fog.on || document.visibilityState !== "visible") return;
+  if (t - wcMistLast >= 50) { /* ~20 breaths a second is drift enough */
+    wcMistLast = t;
+    wcFogRepaint();
+    wcBlit();
+  }
+  wcMistReq = requestAnimationFrame(wcMistTick);
+}
+function wcMistStart() {
+  if (!IS_MASTER && !wcMistReq && wcView && chart.fog && chart.fog.on) wcMistReq = requestAnimationFrame(wcMistTick);
 }
 
 function wcBlit() {
@@ -2810,10 +2869,17 @@ function wcBlit() {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.globalCompositeOperation = "source-over";
   ctx.globalAlpha = 1;
+  /* the desk beneath — seen as margin when the eye draws back past 1× */
+  ctx.fillStyle = "#b9c9da";
+  ctx.fillRect(0, 0, c.width, c.height);
   ctx.setTransform(1, 0, 0, 1, ox, oy);
-  /* the vellum */
+  /* the vellum, with a whisper of shadow lifting it off the desk */
+  ctx.shadowColor = "rgba(20,32,48,.35)";
+  ctx.shadowBlur = 14;
   ctx.fillStyle = "#e6edf4";
   ctx.fillRect(0, 0, WC_W * k, WC_H * k);
+  ctx.shadowBlur = 0;
+  ctx.shadowColor = "transparent";
   /* the scene (uploaded background), anchored to its place on the vellum */
   const bg = wcEnsureBg();
   const bp = wcBgRect();
@@ -3034,8 +3100,13 @@ function wcDown(e) {
   }
   if (wcPtrs.size > 2 || wcPinch) return;
   const [x, y] = wcPoint(e);
-  /* roaming: the middle button, the Warden's open hand, or any player's drag */
-  if (e.button === 1 || wcPan || !IS_MASTER) {
+  /* roaming: the middle button, the Warden's open hand, any player's drag,
+     or a press on the desk margin beyond the vellum's edge */
+  const rr = wcCanvas().getBoundingClientRect();
+  const rawX = wcVX + (e.clientX - rr.left) / rr.width * WC_W / wcVK;
+  const rawY = wcVY + (e.clientY - rr.top) / rr.height * WC_H / wcVK;
+  const offVellum = rawX < 0 || rawX > WC_W || rawY < 0 || rawY > WC_H;
+  if (e.button === 1 || wcPan || !IS_MASTER || offVellum) {
     wcPanDrag = { sx: e.clientX, sy: e.clientY, vx0: wcVX, vy0: wcVY };
     return;
   }
@@ -3099,7 +3170,7 @@ function wcMove(e) {
     const r = wcCanvas().getBoundingClientRect();
     const d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) || 1;
     const mx = (a.clientX + b.clientX) / 2, my = (a.clientY + b.clientY) / 2;
-    wcVK = Math.max(1, Math.min(WC_ZOOM_MAX, wcPinch.k0 * d / wcPinch.d0));
+    wcVK = Math.max(WC_ZOOM_MIN, Math.min(WC_ZOOM_MAX, wcPinch.k0 * d / wcPinch.d0));
     /* the world point first gripped stays under the fingers' midpoint */
     wcVX = wcPinch.wx - (mx - r.left) / r.width * WC_W / wcVK;
     wcVY = wcPinch.wy - (my - r.top) / r.height * WC_H / wcVK;
@@ -3251,7 +3322,13 @@ function wcSetColor(i) { wcColor = WC_COLORS[i]; wcErase = false; wcQuillModes(f
 function wcSetWidth(i) { wcWidth = WC_WIDTHS[i]; wcErase = false; wcQuillModes(!!wcFogMode); renderChart(); } /* width also sizes the fog brush */
 function wcToggleErase() { wcErase = !wcErase; wcQuillModes(false); renderChart(); }
 function wcPanToggle() { wcPan = !wcPan; if (wcPan) { wcErase = false; wcBgPlace = false; wcFogMode = null; } renderChart(); }
-function wcFogToggle() { /* raise or lift the veil over this vellum */
+function wcFogTab() { /* the FOG tab: unfolds the fog tools below, touches nothing synced */
+  wcFogPanel = !wcFogPanel;
+  wcFogMode = wcFogPanel && chart.fog.on ? wcFogMode || "reveal" : null;
+  if (wcFogMode) { wcErase = false; wcStick = false; wcPan = false; wcBgPlace = false; }
+  renderChart();
+}
+function wcFogActive() { /* raise or lift the veil over this vellum */
   chart.fog.on = chart.fog.on ? 0 : 1;
   wcFogMode = chart.fog.on ? "reveal" : null;
   if (chart.fog.on) { wcErase = false; wcStick = false; wcPan = false; wcBgPlace = false; }
@@ -3445,6 +3522,7 @@ function renderChart(repaint) {
     el.innerHTML = `<div id="wc-panel">
         <div class="wcbar" id="wc-charts"></div>
         <div class="wcbar" id="wc-tools" hidden></div>
+        <div class="wcbar" id="wc-fog" hidden></div>
         <div class="wcbar" id="wc-glyphs" hidden></div>
         <div id="wc-frame"><canvas id="wc-canvas"></canvas>
           <button id="wc-zoom" class="wtool" hidden onclick="wcViewReset()" title="the whole vellum again">⌖</button></div>
@@ -3461,6 +3539,7 @@ function renderChart(repaint) {
   }
   const chartsBar = document.getElementById("wc-charts");
   const tools = document.getElementById("wc-tools");
+  const fogBar = document.getElementById("wc-fog");
   const glyphs = document.getElementById("wc-glyphs");
   const foot = document.getElementById("wc-foot");
   /* viewing counts as seeing — the glow rests while the Chart is open */
@@ -3475,7 +3554,7 @@ function renderChart(repaint) {
   const pickHero = pickOn && !wcPick.t && wcPick.g[0] === "@";
   const sig = JSON.stringify([IS_MASTER, wcView, wcSel, wcColor, wcWidth, wcErase, armed, wcFull,
     g.on, g.hue, chart.bgv, wcStick, wcGlyph, pickOn && chart.stickers.indexOf(wcPick), pickOn && [wcPick.up, wcPick.r, wcPick.m], wcRenaming,
-    wcPan, wcBgPlace, wcFogMode, chart.fog && chart.fog.on,
+    wcPan, wcBgPlace, wcFogPanel, wcFogMode, chart.fog && chart.fog.on,
     charts.map(wcHasInk), charts.map((c) => c.name)]);
   if (el.dataset.sig !== sig) {
     el.dataset.sig = sig;
@@ -3503,15 +3582,19 @@ function renderChart(repaint) {
         + `<button class="wtool${wcErase ? " on" : ""}" onclick="wcToggleErase()" title="scrape the vellum">⌫ ERASE</button>
            <button class="wtool${wcStick ? " on" : ""}" onclick="wcStickToggle()" title="place and move pieces">♟ PIECES</button>
            <button class="wtool${wcPan ? " on" : ""}" onclick="wcPanToggle()" title="roam the vellum — scroll or pinch to draw near">✋ ROAM</button>
-           <button class="wtool${chart.fog.on ? " on" : ""}" onclick="wcFogToggle()" title="veil the vellum in fog only thou canst pierce">☁ FOG</button>`
-        + (chart.fog.on
-          ? `<button class="wtool${wcFogMode === "reveal" ? " on" : ""}" onclick="wcFogBrush('reveal')" title="brush the fog aside — quill weights size the brush">🔦 REVEAL</button>
-             <button class="wtool${wcFogMode === "veil" ? " on" : ""}" onclick="wcFogBrush('veil')" title="draw the fog back over">🌫 VEIL</button>
-             <button class="wtool" onclick="wcFogAll()" title="veil the whole vellum again">⟲ ALL</button>`
-          : "")
-        + `<span class="gap"></span>
+           <button class="wtool${wcFogPanel ? " on" : ""}" onclick="wcFogTab()" title="the fog of war — a veil only thou canst pierce">☁ FOG${chart.fog.on ? " ·" : ""}</button>
+           <span class="gap"></span>
            <button class="wtool" onclick="wcUndo()" title="undo the last stroke">↩</button>
            <button class="wtool danger${armed ? " armed" : ""}" onclick="wcClear()" title="burn this chart's ink, pieces and fog">${armed ? "SURE?" : "✕ CLEAR"}</button>`;
+      fogBar.hidden = !wcFogPanel;
+      fogBar.innerHTML = wcFogPanel
+        ? `<button class="wtool${chart.fog.on ? " on" : ""}" onclick="wcFogActive()" title="raise or lift the veil over this vellum">☁ ${chart.fog.on ? "VEIL RAISED" : "VEIL LIFTED"}</button>
+           <span style="width:6px"></span>
+           <button class="wtool${wcFogMode === "reveal" ? " on" : ""}" onclick="wcFogBrush('reveal')" title="brush the fog aside — quill weights size the brush" ${chart.fog.on ? "" : "disabled"}>🔦 REVEAL</button>
+           <button class="wtool${wcFogMode === "veil" ? " on" : ""}" onclick="wcFogBrush('veil')" title="draw the fog back over" ${chart.fog.on ? "" : "disabled"}>🌫 VEIL</button>
+           <button class="wtool danger" onclick="wcFogAll()" title="veil the whole vellum again" ${chart.fog.on ? "" : "disabled"}>⟲ RESET</button>
+           <span class="mnote" style="flex:1;text-align:right">${chart.fog.on ? "players see only what thou revealest" : "raise the veil to hide the vellum"}</span>`
+        : "";
       glyphs.hidden = !wcStick;
       glyphs.innerHTML = wcStick
         ? WC_GLYPHS.map((gl, i) => {
@@ -3558,6 +3641,7 @@ function renderChart(repaint) {
            : "thy quill is seen by all at the table"}</span>`;
   }
   if (wcView && (repaint || !wcInk)) wcResize();
+  wcMistStart(); /* the players' mist stirs whenever the veil is in sight */
 }
 
 window.addEventListener("resize", () => { if (wcView) wcResize(); });
@@ -3583,7 +3667,7 @@ window.addEventListener("load", () => { setTimeout(displayLast, 150); });
 renderSyncToggle();
 if (SYNC_ON) {
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") wakePolling();
+    if (document.visibilityState === "visible") { wakePolling(); wcMistStart(); }
     else clearTimeout(pollTimer);
   });
   window.addEventListener("focus", wakePolling);
